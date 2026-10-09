@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd -- "$ROOT_DIR"
+export VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-libvirt}"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_vagrant() {
+  command -v vagrant >/dev/null || die "vagrant is not installed"
+}
+
+setup_void() {
+  [ "$(id --user)" -ne 0 ] || die "run setup as a regular user; it invokes sudo when needed"
+  command -v sudo >/dev/null || die "sudo is not installed"
+  command -v xbps-install >/dev/null || die "xbps-install is not available; this command requires Void Linux"
+  [ -r /etc/os-release ] || die "cannot identify the host operating system"
+  . /etc/os-release
+  [ "${ID:-}" = void ] || die "lab setup only supports Void Linux"
+
+  sudo xbps-install -Syu -y
+  sudo xbps-install -Sy -y \
+    qemu \
+    qemu-firmware \
+    libvirt \
+    libvirt-devel \
+    dbus \
+    polkit \
+    vagrant \
+    base-devel \
+    ruby-devel \
+    tmux
+
+  for service in dbus libvirtd virtlockd virtlogd; do
+    [ -d "/etc/sv/$service" ] || die "Void service not found: $service"
+    sudo ln --symbolic --force "/etc/sv/$service" "/var/service/$service"
+    sudo sv up "$service"
+  done
+
+  sudo usermod --append --groups libvirt,kvm "$(id --user --name)"
+  vagrant plugin install vagrant-libvirt
+
+  printf '%s\n' \
+    "Void lab dependencies are installed." \
+    "Log out and back in before running ./scripts/lab up so the new groups apply."
+  if [ ! -e /dev/kvm ]; then
+    printf '%s\n' \
+      "warning: /dev/kvm is missing; the VMs will run under slow QEMU emulation." \
+      "Enable hardware virtualization (or nested virtualization) for KVM."
+  fi
+}
+
+tmux_command() {
+  local node="$1"
+  printf 'cd %q && vagrant ssh %q -- -t sudo -i' "$ROOT_DIR" "$node"
+}
+
+panes() {
+  command -v tmux >/dev/null || die "tmux is not installed"
+  require_vagrant
+  vagrant up
+
+  local win="cka"
+  local attach=0
+  local target
+  local tmux_command_line
+
+  tmux_command_line="$(tmux_command control-plane)"
+  if [ -n "${TMUX:-}" ]; then
+    target="$(tmux new-window -P -F '#{window_id}' -n "$win" "$tmux_command_line")"
+  else
+    if tmux has-session -t "$win" 2>/dev/null; then
+      die "tmux session '$win' already exists; attach with: tmux attach -t $win"
+    fi
+    target="$(tmux new-session -d -s "$win" -P -F '#{window_id}' "$tmux_command_line")"
+    attach=1
+  fi
+  tmux split-window -h -t "$target" "$(tmux_command worker-1)"
+  tmux split-window -v -t "$target" "$(tmux_command worker-2)"
+  if [ "$attach" -eq 1 ]; then
+    tmux attach -t "$win"
+  fi
+}
+
+is_node() {
+  case "${1:-}" in
+    control-plane|worker-1|worker-2) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_command() {
+  local command="$1"
+  shift
+
+  if [ "$command" != setup ]; then
+    require_vagrant
+  fi
+
+  case "$command" in
+    setup)
+      setup_void
+      ;;
+    up|start)
+      vagrant up "$@"
+      ;;
+    provision)
+      vagrant provision "$@"
+      ;;
+    down)
+      vagrant halt "$@"
+      ;;
+    reset)
+      vagrant destroy --force "$@"
+      vagrant up "$@"
+      ;;
+    destroy)
+      vagrant destroy --force "$@"
+      ;;
+    ps|status)
+      vagrant status "$@"
+      ;;
+    exec)
+      local node="${1:-}"
+      [ -n "$node" ] || die "exec requires a node name"
+      shift
+      [ "$#" -gt 0 ] || die "exec requires a command"
+      local command_line
+      command_line="$(printf '%q ' "$@")"
+      vagrant ssh "$node" -c "sudo -- $command_line"
+      ;;
+    shell)
+      local node="${1:-control-plane}"
+      vagrant ssh "$node" -- -t sudo -i
+      ;;
+    logs)
+      local node="${1:-}"
+      [ -n "$node" ] || die "logs requires a node name"
+      vagrant ssh "$node" -c 'sudo journalctl --follow --output=short-iso'
+      ;;
+    panes)
+      panes
+      ;;
+    *)
+      usage
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/lab <command>[,<command>...] [arguments]
+
+This helper does not initialize or configure Kubernetes.
+
+Commands:
+  Commands are comma-separated; spaces remain available for arguments.
+  setup                      Install Void/libvirt/Vagrant host dependencies
+  up                         Create, boot, and provision the three VMs
+  provision [node]           Re-run provisioning
+  down                       Halt VMs and preserve their disks
+  reset [node]               Destroy and recreate VMs from a clean baseline
+  destroy                    Halt VMs and remove all lab state
+  ps                         Show VM status
+  exec <node> [command ...]  Run a command inside a VM
+  shell <node>               Open a root shell in a VM
+  logs <node>                Follow system logs in a VM
+  panes                      Open all three VMs in one tmux window
+EOF
+}
+
+sequence_args=()
+for argument in "$@"; do
+  while [[ "$argument" == *,* ]]; do
+    sequence_args+=("${argument%%,*}" "__KUBESTRONAUT_NEXT_COMMAND__")
+    argument="${argument#*,}"
+  done
+  sequence_args+=("$argument")
+done
+set -- "${sequence_args[@]}"
+[ "$#" -gt 0 ] || {
+  usage
+  exit 1
+}
+
+run_group() {
+  local command="${1:-}"
+  [ -n "$command" ] || die "empty command in sequence"
+  shift
+
+  case "$command" in
+    setup)
+      [ "$#" -eq 0 ] || die "setup does not accept arguments"
+      run_command setup
+      ;;
+    up|start|provision|down|reset|destroy|ps|status)
+      nodes=()
+      while [ "$#" -gt 0 ] && is_node "$1"; do
+        nodes+=("$1")
+        shift
+      done
+      [ "$#" -eq 0 ] || die "$command accepts only optional node names"
+      run_command "$command" "${nodes[@]}"
+      ;;
+    shell)
+      node="control-plane"
+      if [ "$#" -gt 0 ] && is_node "$1"; then
+        node="$1"
+        shift
+      fi
+      [ "$#" -eq 0 ] || die "shell accepts only an optional node name"
+      run_command shell "$node"
+      ;;
+    logs)
+      node="${1:-}"
+      [ -n "$node" ] || die "logs requires a node name"
+      shift
+      [ "$#" -eq 0 ] || die "logs accepts one node name"
+      run_command logs "$node"
+      ;;
+    exec)
+      run_command exec "$@"
+      ;;
+    panes)
+      [ "$#" -eq 0 ] || die "panes does not accept arguments"
+      run_command panes
+      ;;
+    *)
+      usage
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
+while [ "$#" -gt 0 ]; do
+  group=()
+  while [ "$#" -gt 0 ] && [ "$1" != "__KUBESTRONAUT_NEXT_COMMAND__" ]; do
+    group+=("$1")
+    shift
+  done
+  [ "$#" -gt 0 ] && shift
+  [ "${group[0]:-}" != "exec" ] || [ "$#" -eq 0 ] || \
+    die "exec must be the last command in a sequence"
+  run_group "${group[@]}"
+done

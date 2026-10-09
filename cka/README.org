@@ -1,0 +1,167 @@
+#+title: CKA Vagrant Lab
+
+* Purpose
+
+This directory provides three real Ubuntu 24.04 virtual machines for CKA
+practice:
+
+- =control-plane=: =192.168.250.10=
+- =worker-1=: =192.168.250.11=
+- =worker-2=: =192.168.250.12=
+
+The VMs use KVM/libvirt through Vagrant. Each node has its own kernel,
+filesystem, cgroups, network namespace, and virtual disk. This makes kubelet
+disk accounting, CNI, storage, and node troubleshooting behave like a normal
+multi-node installation instead of sharing the Docker host filesystem.
+
+The lab provisions machines only. It does not initialize or configure
+Kubernetes for you.
+
+* What it provides
+
+- Ubuntu 24.04 VMs with systemd as PID 1.
+- The Kubernetes packages for the configured minor version:
+  =kubeadm=, =kubelet=, and =kubectl=.
+- =containerd= configured with the systemd cgroup driver.
+- =crictl= configured for containerd.
+- CKA node troubleshooting tools including =conntrack=, =dnsutils=,
+  =ebtables=, =ethtool=, =ipvsadm=, =iptables=, =kmod=, =nftables=,
+  =tcpdump=, and =vim-tiny=.
+- Interactive Bash shells start in vi editing mode.
+- A kubeadm starter configuration at =/root/kubeadm-config.yaml=.
+- Explicit host entries for all three nodes.
+
+* Deliberate empty state
+
+The lab does not run =kubeadm init= or =kubeadm join= and does not install a
+CNI, CoreDNS, a StorageClass, Metrics Server, Helm, or any other Kubernetes
+add-on. It also does not load Kubernetes kernel modules, write Kubernetes
+sysctls, disable swap, create a kubeconfig, or create storage paths.
+
+Perform those tasks yourself as part of the CKA practice. The VM boundary
+means the normal CKA commands for kernel modules, sysctls, kubelet settings,
+networking, storage, and disk pressure operate against the VM rather than the
+host.
+
+* Requirements
+
+- Void Linux host. Run the setup command as a regular user; it invokes =sudo=
+  to install the host dependencies, enable runit services, add the current
+  user to the =libvirt= and =kvm= groups, and install Vagrant's libvirt plugin:
+
+#+begin_src sh
+./scripts/lab setup
+#+end_src
+
+Log out and back in after changing group membership if the current shell does
+not yet have access to libvirt.
+
+The provisioning script uses =apt-get= inside the Ubuntu guest VMs. That is
+intentional; those commands are not host setup commands.
+
+- At least 6 CPUs and 8 GiB RAM available to the VMs.
+- An =x86_64= or =aarch64= host, ideally with KVM (=/dev/kvm=).
+- Internet access while provisioning packages and downloading =crictl=.
+
+The default box is =cloud-image/ubuntu-24.04= version =20260926.0.0=, which
+publishes libvirt provider builds for both =amd64= and =arm64=. Vagrant
+downloads the build matching the host architecture. Override it with
+=VAGRANT_BOX=...= and =VAGRANT_BOX_VERSION=...= when using a compatible local
+box.
+
+* Architectures
+
+The lab runs on =x86_64= and =aarch64= hosts. The Vagrantfile detects the host
+architecture and adjusts the libvirt domain:
+
+- =x86_64=: libvirt defaults with nested virtualization enabled.
+- =aarch64=: =virt= machine type, UEFI boot, virtio video and input devices.
+  UEFI firmware is looked up in the usual distribution paths (Void's
+  =qemu-firmware=, Debian's =qemu-efi-aarch64=, Fedora's and Arch's =edk2=
+  packages). Set =LIBVIRT_LOADER=/path/to/CODE.fd= if yours lives elsewhere.
+  Each node keeps its UEFI variables in
+  =/var/lib/libvirt/qemu/nvram/kubestronaut-cka-<node>_VARS.fd=; libvirt
+  creates them from the firmware template on first boot.
+
+Without =/dev/kvm= (for example when the host is itself a VM without nested
+virtualization, such as a Linux VM on Apple Silicon) the lab falls back to
+QEMU's software emulation. Everything still works, but expect provisioning
+and Kubernetes to be several times slower. Force a driver with
+=LIBVIRT_DRIVER=kvm= or =LIBVIRT_DRIVER=qemu=.
+
+The practice network uses =192.168.250.0/24= so it does not collide with the
+common Docker bridge range =172.30.0.0/24=.
+
+* Lifecycle
+
+Run these commands from this directory:
+
+#+begin_src sh
+./scripts/lab up
+./scripts/lab ps
+./scripts/lab shell control-plane
+./scripts/lab exec worker-1 hostname
+./scripts/lab down
+./scripts/lab reset
+./scripts/lab destroy
+#+end_src
+
+Commands can be passed as a comma-separated sequence and are handled from left
+to right. Spaces remain available for command arguments. For example, this
+destroys the current VMs, recreates them, and opens the tmux panes:
+
+#+begin_src sh
+./scripts/lab destroy,panes
+#+end_src
+
+The =panes= command always runs =vagrant up= first, so it also works when the
+VMs have not been created or are halted. =exec= consumes the remaining
+arguments in its comma-delimited group and must therefore be the last command
+in a sequence.
+
+Use =down= to stop VMs while preserving their disks. Use =reset= to destroy and
+recreate the VMs from the provisioned baseline while leaving them running. This
+clears Kubernetes state, workloads, files, and all other changes made inside
+the guests. Pass a node name to reset only that VM. Use =destroy= when you want
+to remove all lab state without recreating the VMs.
+
+Re-run provisioning after changing the image setup:
+
+#+begin_src sh
+./scripts/lab provision
+#+end_src
+
+Open all three shells in tmux with:
+
+#+begin_src sh
+./scripts/lab panes
+#+end_src
+
+The public helper preserves the repository's version controls:
+
+#+begin_src sh
+KUBERNETES_MINOR_VERSION=1.35 CRICTL_VERSION=v1.37.0 ./scripts/lab up
+#+end_src
+
+* Kubernetes setup
+
+After provisioning, initialize the control plane with the supplied config:
+
+#+begin_src sh
+./scripts/lab shell control-plane
+kubeadm init --config /root/kubeadm-config.yaml
+export KUBECONFIG=/etc/kubernetes/admin.conf
+#+end_src
+
+Run the generated =kubeadm join= command on both workers. Then install the
+CNI plugin required by the exercise. The supplied pod CIDR is
+=10.244.0.0/16=, which is suitable for a Flannel practice installation.
+
+Do not copy Kubernetes state between machines. Vagrant disks are intentionally
+independent, and =destroy= removes them for a clean bootstrap.
+
+* Provider notes
+
+Libvirt is the supported provider for this lab. The helper sets
+=VAGRANT_DEFAULT_PROVIDER=libvirt= automatically so that an installed
+VirtualBox provider cannot be selected accidentally.

@@ -1,0 +1,110 @@
+require "etc"
+
+VAGRANTFILE_API_VERSION = "2"
+
+NODES = {
+  "control-plane" => {
+    ip: "192.168.250.10",
+    cpus: 2,
+    memory: 4096
+  },
+  "worker-1" => {
+    ip: "192.168.250.11",
+    cpus: 2,
+    memory: 2048
+  },
+  "worker-2" => {
+    ip: "192.168.250.12",
+    cpus: 2,
+    memory: 2048
+  }
+}.freeze
+
+# cloud-image/ubuntu-24.04 publishes libvirt builds for amd64 and arm64;
+# Vagrant picks the build matching the host architecture.
+BOX = ENV.fetch("VAGRANT_BOX", "cloud-image/ubuntu-24.04")
+BOX_VERSION = ENV.fetch("VAGRANT_BOX_VERSION", "20260926.0.0")
+KUBERNETES_MINOR_VERSION = ENV.fetch("KUBERNETES_MINOR_VERSION", "1.35")
+CRICTL_VERSION = ENV.fetch("CRICTL_VERSION", "v1.37.0")
+
+HOST_ARCH = case Etc.uname[:machine]
+            when "aarch64", "arm64" then "aarch64"
+            else "x86_64"
+            end
+
+# Without /dev/kvm (e.g. a host that is itself a VM without nested
+# virtualization) libvirt can still run the guests with QEMU's TCG emulator.
+LIBVIRT_DRIVER = ENV.fetch("LIBVIRT_DRIVER") do
+  File.exist?("/dev/kvm") ? "kvm" : "qemu"
+end
+
+# aarch64 guests boot via UEFI only; the firmware path differs per distribution.
+AARCH64_FIRMWARE_CANDIDATES = [
+  "/usr/share/qemu/edk2-aarch64-code.fd",          # Void, Alpine, upstream QEMU
+  "/usr/share/AAVMF/AAVMF_CODE.fd",                # Debian, Ubuntu
+  "/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw",   # Fedora, RHEL
+  "/usr/share/edk2/aarch64/QEMU_CODE.fd",          # Arch Linux
+  "/usr/share/edk2-armvirt/aarch64/QEMU_CODE.fd"   # older Arch Linux
+].freeze
+
+def aarch64_firmware
+  path = ENV.fetch("LIBVIRT_LOADER") do
+    AARCH64_FIRMWARE_CANDIDATES.find { |candidate| File.exist?(candidate) }
+  end
+  return path if path
+
+  abort "No aarch64 UEFI firmware found. Install your distribution's " \
+        "edk2/AAVMF package or set LIBVIRT_LOADER to its CODE image."
+end
+
+if LIBVIRT_DRIVER == "qemu" && ARGV.first == "up"
+  warn "warning: /dev/kvm is unavailable; guests run under slow QEMU emulation"
+end
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = BOX
+  config.vm.box_version = BOX_VERSION
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.ssh.forward_agent = false
+
+  NODES.each do |name, settings|
+    config.vm.define name do |node|
+      node.vm.hostname = name
+      node.vm.network "private_network", ip: settings[:ip]
+      node.vm.provision "file",
+        source: "kubeadm-config.yaml",
+        destination: "/tmp/kubeadm-config.yaml"
+      node.vm.provision "shell",
+        path: "scripts/provision-node",
+        args: [KUBERNETES_MINOR_VERSION, CRICTL_VERSION]
+
+      node.vm.provider "libvirt" do |libvirt|
+        libvirt.driver = LIBVIRT_DRIVER
+        libvirt.cpus = settings[:cpus]
+        libvirt.memory = settings[:memory]
+        libvirt.disk_driver :cache => "none"
+
+        if HOST_ARCH == "aarch64"
+          # The vagrant-libvirt defaults (cirrus video, PS/2 mouse, APIC/PAE,
+          # vmx/svm nesting flags) only exist on x86.
+          libvirt.machine_arch = "aarch64"
+          libvirt.machine_type = "virt"
+          libvirt.loader = aarch64_firmware
+          libvirt.nvram = "/var/lib/libvirt/qemu/nvram/kubestronaut-cka-#{name}_VARS.fd"
+          libvirt.features = ["acpi"]
+          libvirt.video_type = "virtio"
+          libvirt.input :type => "keyboard", :bus => "virtio"
+          libvirt.input :type => "tablet", :bus => "virtio"
+          libvirt.cpu_mode = "host-passthrough" if LIBVIRT_DRIVER == "kvm"
+        else
+          libvirt.nested = LIBVIRT_DRIVER == "kvm"
+        end
+
+        if LIBVIRT_DRIVER == "qemu"
+          libvirt.cpu_mode = "custom"
+          libvirt.cpu_model = "max"
+        end
+      end
+    end
+  end
+end

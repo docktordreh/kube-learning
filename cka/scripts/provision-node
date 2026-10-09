@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+KUBERNETES_MINOR_VERSION="${1:?missing Kubernetes minor version}"
+CRICTL_VERSION="${2:?missing crictl version}"
+ARCH="$(dpkg --print-architecture)"
+
+case "$ARCH" in
+  amd64) CRICTL_ARCH="amd64" ;;
+  arm64) CRICTL_ARCH="arm64" ;;
+  *)
+    printf 'unsupported architecture: %s\n' "$ARCH" >&2
+    exit 1
+    ;;
+esac
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install --yes --no-install-recommends \
+  apt-transport-https \
+  bash-completion \
+  ca-certificates \
+  containerd \
+  conntrack \
+  curl \
+  dnsutils \
+  ebtables \
+  ethtool \
+  gpg \
+  iproute2 \
+  ipset \
+  iptables \
+  iputils-ping \
+  ipvsadm \
+  jq \
+  kmod \
+  less \
+  net-tools \
+  nftables \
+  openssh-client \
+  procps \
+  socat \
+  tcpdump \
+  vim-tiny \
+  wget
+
+install --directory --mode=0755 /etc/apt/keyrings
+curl --fail --silent --show-error --location \
+  "https://pkgs.k8s.io/core:/stable:/v${KUBERNETES_MINOR_VERSION}/deb/Release.key" \
+  | gpg --yes --dearmor --output /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+printf '%s\n' \
+  "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${KUBERNETES_MINOR_VERSION}/deb/ /" \
+  > /etc/apt/sources.list.d/kubernetes.list
+
+apt-get update
+apt-get install --yes kubeadm kubectl kubelet
+apt-mark hold kubeadm kubectl kubelet
+
+install --directory --mode=0755 /etc/containerd
+containerd config default > /etc/containerd/config.toml
+sed --in-place 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+printf '%s\n' \
+  'runtime-endpoint: unix:///run/containerd/containerd.sock' \
+  'image-endpoint: unix:///run/containerd/containerd.sock' \
+  'timeout: 10' \
+  'debug: false' \
+  > /etc/crictl.yaml
+
+curl --fail --silent --show-error --location \
+  "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-linux-${CRICTL_ARCH}.tar.gz" \
+  | tar --extract --gzip --directory=/usr/local/bin crictl
+
+install --mode=0644 /tmp/kubeadm-config.yaml /root/kubeadm-config.yaml
+
+declare -A NODE_ADDRESSES=(
+  [control-plane]=192.168.250.10
+  [worker-1]=192.168.250.11
+  [worker-2]=192.168.250.12
+)
+
+NODE_NAME="$(hostname --short)"
+NODE_IP="${NODE_ADDRESSES[$NODE_NAME]:?unsupported hostname: $NODE_NAME}"
+
+if ! grep --fixed-strings --line-regexp --quiet 'set -o vi' /etc/bash.bashrc; then
+  printf '%s\n' 'set -o vi' >> /etc/bash.bashrc
+fi
+
+printf '%s\n' "KUBELET_EXTRA_ARGS=--node-ip=${NODE_IP}" > /etc/default/kubelet
+
+sed --in-place \
+  '/^# BEGIN KUBESTRONAUT CKA NODES$/,/^# END KUBESTRONAUT CKA NODES$/d' \
+  /etc/hosts
+
+for node in "${!NODE_ADDRESSES[@]}"; do
+  sed --in-place -E "/^[^#[:space:]]+[[:space:]]+${node}([[:space:]]|$)/d" /etc/hosts
+done
+
+printf '%s\n' \
+  '# BEGIN KUBESTRONAUT CKA NODES' \
+  '192.168.250.10 control-plane' \
+  '192.168.250.11 worker-1' \
+  '192.168.250.12 worker-2' \
+  '# END KUBESTRONAUT CKA NODES' \
+  >> /etc/hosts
+
+systemctl enable containerd kubelet
+systemctl restart containerd
+
+rm --recursive --force /var/lib/apt/lists/*
