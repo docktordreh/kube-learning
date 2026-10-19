@@ -1,0 +1,71 @@
+id: workloads-001
+title: Zero-downtime rolling update and scale-out
+domain: workloads
+objectives: [workloads/deployments]
+difficulty: 1
+estimated_minutes: 5
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [web, storefront, portal]}
+  app: {choices: [frontend, landing, gateway]}
+  replicas: {choices: ["3", "4", "5"]}
+  surge: {choices: ["1", "2"]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}"}
+
+checks:
+  - id: image
+    description: "Deployment {{app}} runs nginx:1.31-alpine"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+    op: matches
+    value: "(^|/)nginx:1\\.31-alpine$"
+  - id: replicas
+    description: "{{replicas}} replicas, all updated and available"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: "{{replicas}}"
+    timeout: 60
+  - id: max-unavailable
+    description: "Rolling update strategy has maxUnavailable 0"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.strategy.rollingUpdate.maxUnavailable}"
+    value: "0"
+  - id: max-surge
+    description: "Rolling update strategy has maxSurge {{surge}}"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.strategy.rollingUpdate.maxSurge}"
+    value: "{{surge}}"
+  - id: rolled
+    description: "The update was a rollout (revision ≥ 2, history kept for rollback)"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.annotations.deployment\\.kubernetes\\.io/revision}"
+    op: gte
+    value: "2"
+
+hints:
+  - "Three things change on one Deployment: the update strategy, the image, the replica count."
+  - "`kubectl set image`, `kubectl scale` and `kubectl patch` (or `kubectl edit`) cover all three. The container is called `nginx`."
+  - "Set `spec.strategy.rollingUpdate.maxUnavailable: 0` and `maxSurge: {{surge}}` *before* changing the image so the rollout itself uses them; watch with `kubectl rollout status`."
+
+competencies:
+  - Rolling update strategy parameters (maxSurge, maxUnavailable)
+  - Updating images and scaling Deployments imperatively
+  - Observing rollouts and revision history
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment
+  - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_set/kubectl_set_image/
+  - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/

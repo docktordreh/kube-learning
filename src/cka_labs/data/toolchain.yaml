@@ -1,0 +1,27 @@
+# Pinned toolchain. Verified 2026-10-19.
+# kind release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.33.0
+kind:
+  version: v0.33.0
+  node_image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+kubectl:
+  # https://dl.k8s.io/release/stable.txt
+  version: v1.37.1
+kubeadm:
+  # Ubuntu box for the Vagrant/libvirt backend (publishes amd64 and arm64 libvirt builds).
+  box: cloud-image/ubuntu-24.04
+  box_version: "20260926.0.0"
+  kubernetes_minor: "1.37"
+  # Baseline cluster version and the target used by the upgrade lab.
+  kubernetes_version: "1.37.0"
+  upgrade_version: "1.37.1"
+  crictl_version: v1.37.0
+  calico_version: v3.33.0
+  pod_subnet: 10.244.0.0/16
+  # Kept distinct from the hand-managed lab in cka/ (192.168.250.0/24).
+  network_prefix: 192.168.251
+# Images used by lab manifests. `cka setup` pulls them once and loads them into the cluster,
+# so labs work offline. Labs may only reference images listed here (a test enforces it).
+images:
+  - docker.io/library/busybox:1.37
+  - docker.io/library/nginx:1.30-alpine
+  - docker.io/library/nginx:1.31-alpine

@@ -1,0 +1,68 @@
+id: networking-001
+title: Service with no endpoints
+domain: networking
+objectives: [networking/services, troubleshooting/services]
+difficulty: 2
+estimated_minutes: 6
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [shop, billing, inventory]}
+  app: {choices: [catalog, ledger, stock]}
+  wrong_tier: {choices: [frontend, cache, web]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}"}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+  - capture: deploy_generation
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.generation}"
+
+checks:
+  - id: endpoints
+    description: "Service {{app}} has ready endpoints"
+    type: service_endpoints
+    namespace: "{{ns}}"
+    service: "{{app}}"
+    min_ready: 2
+    timeout: 20
+  - id: traffic
+    description: "HTTP via the Service DNS name reaches nginx"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", "http://{{app}}.{{ns}}.svc.cluster.local"]
+    output_matches: "Welcome to nginx"
+    timeout: 20
+  - id: deployment-untouched
+    role: guard
+    description: "Deployment {{app}} was not modified"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.generation}"
+    value: "{{captured.deploy_generation}}"
+  - id: backend-ready
+    role: guard
+    description: "Backend Deployment still fully available"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+
+hints:
+  - "Start from the Service: does it have any endpoints? Compare `kubectl -n {{ns}} get endpointslices` with the backend Pods."
+  - "`kubectl -n {{ns}} get svc {{app}} -o wide` shows the selector; `kubectl -n {{ns}} get pods --show-labels` shows what the Pods actually carry."
+  - "A Service selects Pods whose labels contain *all* of its selector's key/value pairs. One pair here matches no Pod. Change the Service, not the Deployment."
+
+competencies:
+  - Relating Services to Pods through label selectors
+  - Reading EndpointSlices to diagnose a Service
+  - Testing Service DNS and connectivity from inside the cluster
+
+docs:
+  - https://kubernetes.io/docs/concepts/services-networking/service/
+  - https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/
+  - https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/
