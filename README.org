@@ -1,2 +1,121 @@
-#+title: cka-labs
-(placeholder; full README written in phase 6)
+#+title: cka-labs: CKA practice labs and mock exams
+
+* Overview
+
+=cka-labs= is a local command-line training tool for Kubernetes administrators.
+It creates disposable clusters, introduces a fault, checks the live cluster
+state, and stores practice results in SQLite.
+
+The project is independent of the Linux Foundation. Its labs are original
+practice exercises, not CKA exam questions.
+
+The current CKA target is Kubernetes =v1.37=, verified on 2026-10-19. The
+version, domain weights, and objectives live in
+=src/cka_labs/data/curriculum.yaml=.
+
+* Start with kind
+
+Requirements: Python 3.12 or newer, Docker, and internet access for the first
+install. The kind node image supports amd64 and arm64.
+
+#+begin_src sh
+uv sync
+uv run cka setup
+uv run cka doctor
+uv run cka lab list
+uv run cka lab start
+#+end_src
+
+The last command selects a lab based on your recorded results. To choose one
+yourself, run =cka lab start networking-001=.
+
+* Work through a lab
+
+#+begin_src sh
+cka lab status
+cka shell
+cka lab hint
+cka lab check
+cka lab solution
+cka lab reset
+cka lab stop
+#+end_src
+
+=cka shell= opens a shell with the lab's kubeconfig. =cka lab solution= is
+learning mode and marks the attempt as non-clean.
+
+The CLI keeps kubeconfigs under
+=${XDG_DATA_HOME:-~/.local/share}/cka-labs/kubeconfig=. It does not read or
+write =~/.kube/config=. Before it mutates a cluster, it checks the cka marker
+ConfigMap in =kube-system=.
+
+* Labs and progress
+
+The catalog contains 22 labs across the five CKA domains. All 22 passed the
+real kind conformance cycle on Kubernetes v1.37. The cycle checks setup, the
+initial fault, the reference fix, grading, reset, and cleanup.
+
+#+begin_src sh
+cka practice --weakest
+cka practice --domain troubleshooting
+cka practice --difficulty advanced
+cka progress
+cka progress --json > progress.json
+#+end_src
+
+* Mock exam
+
+#+begin_src sh
+cka exam start
+cka exam status
+cka exam task 3
+cka exam skip 3
+cka exam submit
+cka exam results
+#+end_src
+
+The default exam has eight tasks and a 120-minute limit. It selects tasks in
+the official 25/15/20/10/30 domain proportions and assigns points by
+difficulty. Kind exams use namespace-isolated tasks in one cluster. Node and
+control-plane tasks are available as labs and require the kubeadm backend.
+
+Scores measure local practice performance. They are not official CKA results.
+
+* Backends
+
+** kind
+
+kind runs Kubernetes nodes in Docker containers. The nodes include systemd,
+kubelet, containerd, static Pod manifests, and NetworkPolicy support. Use kind
+for API, workload, networking, storage, and application troubleshooting labs.
+It cannot reproduce a separate kernel, VM disk, or package-level upgrade.
+
+** kubeadm and libvirt
+
+The kubeadm backend uses three Ubuntu VMs through Vagrant and libvirt. It
+installs containerd, kubeadm, kubelet, Calico, and the node troubleshooting
+tools. The backend copies the existing =cka/= Vagrant inputs into the cka data
+directory and changes the network to =192.168.251.0/24=. It does not adopt the
+hand-managed VMs in =cka/=.
+
+#+begin_src sh
+CKA_BACKEND=kubeadm cka lab start troubleshooting-007
+#+end_src
+
+See [[file:docs/installation.org][installation]] and [[file:docs/safety.org][safety]] before using the VM backend.
+
+* Development
+
+#+begin_src sh
+uv run pytest -q
+uv run pytest -m integration
+uv run cka dev validate
+uv run cka dev verify networking-001
+#+end_src
+
+Read [[file:docs/authoring.org][authoring]] before adding a lab. Agent instructions are in
+[[file:AGENTS.md][AGENTS.md]], and repository skills are in =.agents/skills/=.
+
+* License
+
+Apache-2.0.

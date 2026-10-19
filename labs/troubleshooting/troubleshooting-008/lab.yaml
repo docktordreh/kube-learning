@@ -1,0 +1,75 @@
+id: troubleshooting-008
+title: The API server is down
+domain: troubleshooting
+objectives: [troubleshooting/components, architecture/kubeadm]
+difficulty: 4
+estimated_minutes: 12
+backends: [kind, kubeadm]
+isolation: cluster
+params:
+  fault: {choices: ["https://127.0.0.1:2380", "https://127.0.0.1:12379", "http://127.0.0.1:2379"]}
+
+setup:
+  - node: "{{node.controlplane}}"
+    run: |
+      set -eu
+      dir=/var/lib/cka-labs/troubleshooting-008
+      mkdir -p "$dir"
+      [ -f "$dir/kube-apiserver.yaml" ] || cp -a /etc/kubernetes/manifests/kube-apiserver.yaml "$dir/kube-apiserver.yaml"
+      sed -i 's#--etcd-servers=.*#--etcd-servers={{fault}}#' /etc/kubernetes/manifests/kube-apiserver.yaml
+  - wait:
+      type: script
+      script: "! kubectl --request-timeout=3s get --raw /readyz >/dev/null 2>&1"
+    timeout: 180
+
+cleanup:
+  - node: "{{node.controlplane}}"
+    run: |
+      set -eu
+      backup=/var/lib/cka-labs/troubleshooting-008/kube-apiserver.yaml
+      if [ -f "$backup" ]; then cp -a "$backup" /etc/kubernetes/manifests/kube-apiserver.yaml && rm -f "$backup"; fi
+  - wait:
+      type: script
+      script: "kubectl --request-timeout=3s get --raw /readyz >/dev/null"
+    timeout: 240
+
+checks:
+  - id: api-ready
+    description: "The API server answers /readyz"
+    type: script
+    script: "kubectl --request-timeout=5s get --raw /readyz"
+    timeout: 180
+  - id: etcd-endpoint
+    description: "kube-apiserver talks to etcd on its client endpoint"
+    type: node_exec
+    node: "{{node.controlplane}}"
+    run: "grep -E -- '--etcd-servers=https://127.0.0.1:2379$' /etc/kubernetes/manifests/kube-apiserver.yaml"
+  - id: nodes-ready
+    description: "All nodes report Ready again"
+    type: script
+    script: |
+      out=$(kubectl --request-timeout=5s get nodes --no-headers) || exit 1
+      echo "$out" | awk '{print $1, $2}'
+      ! echo "$out" | awk '{print $2}' | grep -qv '^Ready$'
+    timeout: 120
+  - id: single-apiserver
+    role: guard
+    description: "No stray copies of manifests in /etc/kubernetes/manifests"
+    type: node_exec
+    node: "{{node.controlplane}}"
+    run: "[ $(ls /etc/kubernetes/manifests | wc -l) -eq 4 ]"
+
+hints:
+  - "kubectl cannot help while the API server is down. Go to the control plane node (`cka ssh {{node.controlplane}}`) and ask the container runtime: `crictl ps -a | grep kube-apiserver`."
+  - "Read why it exits: `crictl logs <container-id>` of the latest attempt, or `/var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log`."
+  - "The API server is a static Pod defined in `/etc/kubernetes/manifests/kube-apiserver.yaml`. Compare its etcd flags with etcd's own manifest (`--listen-client-urls`, `--advertise-client-urls`) and fix the file in place. The kubelet restarts the Pod by itself. Never leave backup copies in that directory."
+
+competencies:
+  - Static Pods and the kubelet's manifest directory
+  - Debugging control-plane components with crictl and Pod log files
+  - API server ↔ etcd connectivity (client vs peer port, TLS)
+
+docs:
+  - https://kubernetes.io/docs/tasks/debug/debug-cluster/
+  - https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/
+  - https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/

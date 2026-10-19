@@ -1,0 +1,68 @@
+#+title: Installation and daily workflow
+
+* kind prerequisites
+
+- Python 3.12 or newer
+- Docker Engine or Docker Desktop with permission to use the daemon
+- amd64 or arm64 host/image support
+- internet access for the first tool and image download
+
+KVM is not required for kind. Check the environment without changing anything:
+
+#+begin_src sh
+uv sync
+uv run cka doctor
+#+end_src
+
+Install pinned tools and cache the v1.37 node image and lab images:
+
+#+begin_src sh
+uv run cka setup
+#+end_src
+
+The installer writes only to =${XDG_DATA_HOME:-~/.local/share}/cka-labs= and
+verifies upstream SHA-256 files. The Docker image cache permits later labs to
+run without registry access. A lab that deliberately tests an image pull
+failure is the one exception: its bad image is intentionally absent.
+
+* First lab
+
+#+begin_src sh
+uv run cka lab start networking-001
+#+end_src
+
+Omitting the id chooses an adaptive recommendation. Run =cka lab check= as
+often as needed. =cka lab stop= deletes only resources owned by that lab;
+=cka cluster down= is a separate, confirmed operation that deletes the
+cka-managed kind cluster.
+
+* kubeadm/libvirt backend
+
+Use this for real-kernel and control-plane scenarios. It needs Vagrant, the
+libvirt provider, qemu/libvirt, and enough guest memory (the source Vagrantfile
+uses 4 GiB control plane + 2 GiB per worker). KVM makes it usable; without KVM,
+QEMU software emulation is much slower.
+
+#+begin_src sh
+uv run cka doctor
+CKA_BACKEND=kubeadm cka lab start troubleshooting-007
+#+end_src
+
+On first use the backend copies =cka/= into the cka data directory, replaces
+the network with =192.168.251.0/24=, provisions three VMs, runs kubeadm, joins
+both workers, and installs pinned Calico. It never uses the original =cka/.vagrant=
+state or the =192.168.250.0/24= network. First use needs guest package and
+manifest downloads. Before an air-gapped run, cache the Ubuntu box, Kubernetes
+packages, Calico manifest and container images in the guests.
+
+* Offline operation
+
+Download tools and images while connected:
+
+#+begin_src sh
+uv run cka setup
+#+end_src
+
+The CLI does not invoke registries after cached images are present for kind.
+Keep the cka data directory and Docker image cache on the workstation. Kubeadm
+also needs its VM disks and guest package/image cache.
