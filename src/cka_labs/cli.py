@@ -21,6 +21,7 @@ from cka_labs import paths, proc, tools
 from cka_labs.backends import Cluster, get_backend
 from cka_labs.config import curriculum
 from cka_labs.engine import catalog, selection
+from cka_labs.engine.exam import ExamService, ExamState, load_exam
 from cka_labs.engine.evaluator import CheckResult
 from cka_labs.engine.lifecycle import ActiveLab, LabService, find_cluster, load_session
 from cka_labs.engine.progress import Progress
@@ -35,10 +36,12 @@ lab_app = typer.Typer(help="Practice labs.", no_args_is_help=True)
 cluster_app = typer.Typer(help="Manage the disposable practice clusters.", no_args_is_help=True)
 node_app = typer.Typer(help="Node access (like `ssh` in the exam).", no_args_is_help=True)
 dev_app = typer.Typer(help="Lab authoring and verification.", no_args_is_help=True)
+exam_app = typer.Typer(help="Timed mock examinations (no hints or solutions).", no_args_is_help=True)
 app.add_typer(lab_app, name="lab")
 app.add_typer(cluster_app, name="cluster")
 app.add_typer(node_app, name="node")
 app.add_typer(dev_app, name="dev")
+app.add_typer(exam_app, name="exam")
 
 BackendOpt = Annotated[
     str | None, typer.Option("--backend", "-b", help="kind (default) or kubeadm; env CKA_BACKEND")
@@ -325,6 +328,146 @@ def lab_env() -> None:
     """Print shell exports for the active cluster: eval "$(cka lab env)"."""
     print(f"export KUBECONFIG={_active_kubeconfig()}")
     print(f'export PATH="{paths.bin_dir()}:$PATH"')
+
+
+# --- exam -------------------------------------------------------------------------------
+
+
+@exam_app.command("start")
+def exam_start(
+    backend: BackendOpt = None,
+    duration: Annotated[int, typer.Option("--duration", help="Time limit in minutes")] = 120,
+    pass_percent: Annotated[int, typer.Option("--pass-percent", help="Locally computed passing threshold")] = 66,
+    seed: Annotated[int | None, typer.Option(help="Reproduce the same task selection")] = None,
+) -> None:
+    """Provision a balanced timed mock exam. The timer starts after setup completes."""
+    service = ExamService(log=log)
+    exam = service.start(backend_name(backend), duration_minutes=duration, pass_percent=pass_percent, seed=seed)
+    console.print(
+        Panel(
+            f"[bold]Exam {exam.exam_id} started[/bold]\n"
+            f"{len(exam.tasks)} tasks · {exam.duration_minutes} minutes · local pass threshold {exam.pass_percent}%\n"
+            f"seed {exam.seed} · this is not an official CKA score",
+            title="mock exam",
+            expand=False,
+        )
+    )
+    _show_exam_task(exam, exam.tasks[0])
+
+
+@exam_app.command("status")
+def exam_status() -> None:
+    """Show remaining time and task states without grading or revealing answers."""
+    exam = ExamService().require()
+    _show_exam_status(exam)
+
+
+@exam_app.command("task")
+def exam_task(
+    number: Annotated[int | None, typer.Argument(help="Task number; omit to open the next pending task")] = None,
+) -> None:
+    """Open an exam task. This is the only task text exposed in strict exam mode."""
+    service = ExamService()
+    exam, task = service.task(number)
+    _show_exam_task(exam, task)
+
+
+@exam_app.command("skip")
+def exam_skip(
+    number: Annotated[int | None, typer.Argument(help="Task number; omit to skip the next pending task")] = None,
+) -> None:
+    """Skip a task; it remains available with `cka exam task N`."""
+    exam = ExamService().skip(number)
+    console.print(f"task skipped; {sum(task.status == 'pending' for task in exam.tasks)} pending")
+
+
+@exam_app.command("submit")
+def exam_submit() -> None:
+    """Evaluate every non-skipped task, record the local score and clean up."""
+    service = ExamService(log=log)
+    exam, reports = service.submit()
+    for task in exam.tasks:
+        results = reports.get(task.number, [])
+        mark = "[green]PASS[/green]" if task.status == "passed" else "[red]FAIL[/red]" if task.status == "failed" else "[yellow]SKIP[/yellow]"
+        console.print(f"{mark} task {task.number}: {task.lab_id} ({task.points} points)")
+        if results:
+            show_results(results)
+    percent = (exam.score or 0) / (exam.max_score or 1) * 100
+    outcome = "PASSED" if percent >= exam.pass_percent else "FAILED"
+    console.print(
+        f"\n[bold]{outcome}[/bold] — {exam.score}/{exam.max_score} points ({percent:.1f}%), "
+        f"threshold {exam.pass_percent}%; local practice result only"
+    )
+
+
+@exam_app.command("results")
+def exam_results(
+    as_json: Annotated[bool, typer.Option("--json", help="Print the stored result as JSON")] = False,
+) -> None:
+    """Show the most recent submitted mock-exam result."""
+    report = Progress().exam_report()
+    if report is None:
+        raise CkaError("no submitted exam results")
+    if as_json:
+        print(json.dumps(report, indent=2, default=str))
+        return
+    percent = report.get("percent", 0)
+    passed = bool(report.get("passed"))
+    console.print(
+        f"[bold {'green' if passed else 'red'}]{'PASSED' if passed else 'FAILED'}[/bold {'green' if passed else 'red'}] "
+        f"— {report.get('score')}/{report.get('max_score')} points ({percent}%), "
+        f"threshold {report.get('pass_percent')}%\nseed: {report.get('seed')}"
+    )
+    tasks = report.get("tasks")
+    if isinstance(tasks, list):
+        for item in tasks:
+            if isinstance(item, dict):
+                console.print(f"  task {item.get('number')}: {item.get('lab_id')} — {item.get('status')}")
+
+
+@exam_app.command("abort")
+def exam_abort(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Do not ask for confirmation")] = False,
+) -> None:
+    """End an exam without a score and clean its managed resources."""
+    service = ExamService(log=log)
+    exam = service.require()
+    if not yes and not typer.confirm("Abort the exam and clean up its tasks?"):
+        raise typer.Abort()
+    service.cleanup(exam)
+    for task in exam.tasks:
+        service.progress.finish_attempt(task.attempt_id, "abandoned")
+    service.progress.finish_exam(exam.exam_id, 0, exam.max_score or 0, {"aborted": True, "exam_id": exam.exam_id})
+    from cka_labs.engine.exam import clear_exam
+
+    clear_exam()
+    console.print("exam aborted; managed resources cleaned")
+
+
+def _show_exam_status(exam: ExamState) -> None:
+    table = Table(header_style="bold")
+    table.add_column("#")
+    table.add_column("lab")
+    table.add_column("domain")
+    table.add_column("points")
+    table.add_column("status")
+    for task in exam.tasks:
+        colour = {"pending": "yellow", "skipped": "dim", "passed": "green", "failed": "red"}[task.status]
+        table.add_row(str(task.number), task.lab_id, task.domain, str(task.points), f"[{colour}]{task.status}[/{colour}]")
+    console.print(table)
+    remaining_seconds = max(0, int(exam.duration_minutes * 60 - (time.time() - exam.started_at)))
+    console.print(f"remaining: {remaining_seconds // 60}m{remaining_seconds % 60:02d}s · task: `cka exam task N`")
+
+
+def _show_exam_task(exam: ExamState, task: object) -> None:
+    from cka_labs.engine.exam import ExamTask
+
+    if not isinstance(task, ExamTask):
+        raise CkaError("invalid exam task")
+    source = catalog.get(task.lab_id)
+    lab = source.load(task.values)
+    show_task(lab, source.read("task.md", task.values), str(find_cluster(task.backend, task.cluster).kubeconfig))
+    console.print(f"\n[dim]Exam task {task.number}/{len(exam.tasks)} · {task.points} points · no hints in exam mode[/dim]")
 
 
 def _active_kubeconfig() -> str:

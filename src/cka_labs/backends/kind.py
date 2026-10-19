@@ -10,6 +10,7 @@ those labs require the kubeadm backend.
 import json
 import os
 import shutil
+import tempfile
 
 from cka_labs import paths, proc
 from cka_labs.backends.base import Backend, Cluster
@@ -72,6 +73,29 @@ class KindCluster(Cluster):
         (self.state_dir / "cluster.json").unlink(missing_ok=True)
         self.bootstrap()
         self.load_images(toolchain().images)
+
+    def ensure(self) -> None:
+        super().ensure()
+        self.install_node_tools()
+
+    def install_node_tools(self) -> None:
+        """kind node images ship no editor. Copy a static busybox (vi, less) from the cached
+        busybox image into each node, as the exam's nodes have an editor."""
+        missing = [n for n in self.nodes().values() if not self.node_exec(n, "test -x /usr/local/bin/vi", 30).ok]
+        if not missing:
+            return
+        image = next(i for i in toolchain().images if "/busybox:" in i)
+        created = proc.run(["docker", "create", image, "true"], timeout=60, check=True).stdout.strip()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                binary = f"{tmp}/busybox"
+                proc.run(["docker", "cp", f"{created}:/bin/busybox", binary], timeout=60, check=True)
+                for node in missing:
+                    self._require_owned_container(node)
+                    proc.run(["docker", "cp", binary, f"{node}:/usr/local/bin/busybox"], timeout=60, check=True)
+                    self.node_exec(node, "cd /usr/local/bin && for t in vi less; do ln -sf busybox $t; done", 30)
+        finally:
+            proc.run(["docker", "rm", created], timeout=60)
 
     def delete(self) -> None:
         if self.exists():

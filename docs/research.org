@@ -1,0 +1,44 @@
+#+title: Design research and decisions
+
+* Sources checked 2026-10-19
+
+- CNCF =CKA_Curriculum_v1.37.pdf= and the Linux Foundation CKA page: current
+  version v1.37, 2-hour performance-based format, and the five weighted domains.
+- public-repo/exam-source: question metadata plus setup and validation shell scripts;
+  weighted exit-code grading in a Docker Compose/kind environment.
+- public scenario scenario examples: =index.json= steps, foreground/background
+  scripts and ordinary shell =verify.sh= exit codes.
+- immanuwell/k16s-exam-simulator: YAML question data with setup/validate
+  scripts and real kubeadm/Incus isolation.
+- Sonobuoy: extensible Kubernetes plugin execution and result collection; useful
+  check-runner conventions, not an exam lifecycle.
+- kind v0.33.0: node image v1.37.0, both amd64/arm64, systemd/containerd/
+  crictl, static manifests at =/etc/kubernetes/manifests=, generated kubeadm
+  config at =/kind/kubeadm.conf=. kindnet has NetworkPolicy enforcement since
+  v0.24.
+- vagrant-libvirt 0.12.2: libvirt domain snapshots are supported, but the
+  initial backend deliberately uses a separate copied project before adding
+  snapshot acceleration.
+- Kubernetes ingress-nginx retirement announcement: Traefik is the likely
+  future both-Ingress-and-Gateway controller; the MVP does not make a Gateway
+  controller a hidden dependency.
+
+* Adopted conventions
+
+exam-source/public scenario's shell setup/validation split is reused, but with typed
+Pydantic metadata and read-only behavioral checks. Exit codes remain useful for
+host scripts; the evaluator adds structured actual-vs-expected details.
+
+The platform uses kind for fast API-level work and a separate Vagrant/libvirt
+kubeadm backend for node/control-plane realism. It does not pretend one
+backend can model both a shared host kernel and an independent VM kernel.
+
+* Deliberate non-goals
+
+- No remote web service or paid-platform dependency.
+- No machine-learning recommendation system; weakness is a transparent
+  Laplace-smoothed failure rate.
+- No actual exam questions or claim of official scoring.
+- No Gateway controller in the first 22-lab catalog: it would add a large
+  offline image dependency for one competency. The schema and curriculum map
+  leave the objective ready for a future verified lab.

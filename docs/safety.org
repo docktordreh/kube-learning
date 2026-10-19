@@ -1,0 +1,41 @@
+#+title: Isolation and safety model
+
+* Cluster identity
+
+Every managed cluster has a cka-owned kubeconfig and a marker ConfigMap
+=kube-system/cka-labs-cluster= containing a random cluster id. All mutating
+paths verify the marker. The user's =KUBECONFIG= and =~/.kube/config= are never
+used; kubectl discovery cache is redirected into the cka data directory.
+
+Kind node access additionally checks Docker's
+=io.x-k8s.kind.cluster= label before =docker exec=. Kind deletion requires a
+=created-by-cka= marker. An existing kind cluster with the same name is
+refused rather than adopted.
+
+* Lab ownership
+
+Namespace labs create namespaces labelled =cka-labs.io/lab=<id>= and delete
+only those labels. Cluster-scoped objects must be explicit =kind/name= entries
+in =owned=. Cleanup has no wildcard Docker volume/image deletion and never runs
+=kubectl delete all=.
+
+The conformance test creates an unrelated =cka-sentinel/keep-me= ConfigMap.
+Every lab must leave it intact. It also checks that all nodes remain Ready and
+that the default kubeconfig has not appeared or changed.
+
+* Grading permissions
+
+The grader uses a cka-created ServiceAccount. It has get/list/watch, read-only
+non-resource reads, Pod exec, and SubjectAccessReview creation. Graders do not
+apply, patch, delete, scale, or restart resources. Node checks are limited to
+read-only authored commands; a node fault is repaired only by the student or
+the lab cleanup path.
+
+* Destructive operations
+
+=cka lab reset= is scoped to the active lab and its saved seed. =cka cluster
+down= and kubeadm VM destruction require explicit confirmation unless =--yes=
+is supplied. The kubeadm backend copies the source project and uses a separate
+network; it will not destroy the repository's hand-managed =cka/= VMs.
+
+If the marker is missing or mismatched, the correct behavior is refusal.

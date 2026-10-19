@@ -1,0 +1,30 @@
+#+title: CKA curriculum source of truth
+
+* Verified 2026-10-19
+
+The current official CKA page and CNCF curriculum identify Kubernetes =v1.37=.
+The domain weights are:
+
+| domain                                      | weight |
+|---------------------------------------------+--------|
+| Cluster Architecture, Installation & Configuration | 25% |
+| Workloads & Scheduling                      | 15%   |
+| Services & Networking                       | 20%   |
+| Storage                                     | 10%   |
+| Troubleshooting                             | 30%   |
+
+Primary sources:
+
+- https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.37.pdf
+- https://www.cncf.io/training/certification/cka/
+- https://training.linuxfoundation.org/certification/certified-kubernetes-administrator-cka/
+
+The parsed objectives and verification date live in
+=src/cka_labs/data/curriculum.yaml=. Lab metadata references stable objective
+ids such as =networking/services=; it does not duplicate curriculum text.
+
+The v1.37 competencies include RBAC, kubeadm, lifecycle, Helm/Kustomize,
+extension interfaces, CRDs/operators; Deployments, configuration, autoscaling,
+self-healing and scheduling; Pod connectivity, NetworkPolicy, Services,
+Gateway/Ingress and CoreDNS; StorageClasses, volume types, reclaim policy and
+PV/PVC; and cluster/node/component/resource/log/service troubleshooting.

@@ -1,0 +1,58 @@
+#+title: Adding a lab safely
+
+* Directory contract
+
+Create =labs/<domain>/<domain>-NNN/= with:
+
+| file             | audience / purpose                        |
+|------------------+-------------------------------------------|
+| =lab.yaml=       | typed metadata, setup, checks, hints, owner|
+| =task.md=        | student-facing request only               |
+| =solution.sh=    | hidden reference solution                 |
+| =explanation.md= | hidden debrief and production recognition |
+| =manifests/=     | declarative fixture inputs                |
+
+The schema is strict Pydantic. Template strings use ={{name}}= and are chosen
+from =params= with a persisted seed. Unknown names are errors. =captured.*=
+values are recorded after setup and are available only to checks.
+
+* State model
+
+Declare =namespace= isolation for ordinary labs and list every owned namespace.
+Declare =cluster= isolation for node/control-plane disruption. List every
+cluster-scoped resource explicitly as =kind/name= in =owned=. Setup must be
+idempotent after cleanup.
+
+Checks have two roles:
+
+- =goal=: must fail immediately after setup and pass after the student fix.
+- =guard=: must pass immediately after setup and remain true, catching
+  collateral changes or a security-policy weakening.
+
+Prefer =service_endpoints=, =pods_ready=, traffic, RBAC
+SubjectAccessReviews, and mounted-file behavior over comparing submitted YAML.
+A valid alternative solution must receive full credit.
+
+* Authoring loop
+
+1. Read the official objective and an existing lab in the same domain.
+2. Write the task in operational language. State constraints and the test
+   entry point, not the answer.
+3. Make the setup inject one reproducible, genuine fault.
+4. Write a reference solution that uses normal kubectl/Linux commands and does
+   not depend on an agent-only helper.
+5. Add at least three progressive hints: resource, diagnostic command,
+   behavior/root cause.
+6. Add an explanation covering controller behavior, production symptoms, and
+   valid alternatives.
+7. Run the gates:
+
+#+begin_src sh
+uv run cka dev validate
+uv run cka dev verify <domain>-NNN --backend kind --seed 1
+#+end_src
+
+The conformance report is the completion criterion. It must show intended
+failure, reference pass, reset restoration, and scoped cleanup. If a lab needs
+VM/kernel/control-plane operations, use =backends: [kubeadm]= or both and do
+not fake that behavior in kind.
