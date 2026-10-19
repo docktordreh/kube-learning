@@ -53,6 +53,7 @@ class KubeadmCluster(Cluster):
     def create(self) -> None:
         self._require_owned_project()
         paths.ensure(self.state_dir)
+        (self.state_dir / "created-by-cka").write_text(self.name)
         proc.run(["vagrant", "up"], env=self._vagrant_env(), timeout=1800, check=True)
         self._prepare_nodes()
         admin_conf = self.project / "admin.conf"
