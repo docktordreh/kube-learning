@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute
+  namespace: {{ns}}
+spec:
+  hard:
+    requests.cpu: 600m
+    requests.memory: 384Mi
+    limits.cpu: "1"
+    limits.memory: 768Mi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: container-limits
+  namespace: {{ns}}
+spec:
+  limits:
+    - type: Pod
+      max:
+        cpu: 300m
+        memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: {{app}}
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: {{app}}
+          image: docker.io/library/busybox:1.37
+          command: ["sleep", "infinity"]

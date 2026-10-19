@@ -240,7 +240,8 @@ class LabService:
         session = self.require_session()
         prepared = self._prepared(session)
         script = prepared.source.read("solution.sh", session.values)
-        result = proc.run(["bash", "-euo", "pipefail", "-c", script], env=prepared.runner.script_env(), timeout=900)
+        # No pipefail: solutions contain diagnostic pipes (`| grep | head`); grading verifies the outcome.
+        result = proc.run(["bash", "-eu", "-c", script], env=prepared.runner.script_env(), timeout=900)
         if not result.ok:
             raise CkaError(f"reference solution failed ({result.returncode}):\n{result.output()[-2000:]}")
         if not session.solved:

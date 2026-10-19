@@ -50,8 +50,8 @@ def validate_lab(source: LabSource) -> list[str]:
     if len(lab.hints) < MIN_HINTS:
         problems.append(f"{prefix}: needs at least {MIN_HINTS} progressive hints")
     problems += [f"{prefix}: docs must be https URLs: {d}" for d in lab.docs if not d.startswith("https://")]
-    if lab.isolation == "namespace" and not lab.namespaces:
-        problems.append(f"{prefix}: namespace-isolated labs must declare the namespaces they own")
+    if lab.isolation == "namespace" and not (lab.namespaces or lab.owned):
+        problems.append(f"{prefix}: namespace-isolated labs must declare the namespaces or resources they own")
 
     allowed_images = {normalise_image(i) for i in toolchain().images}
     for params in _combinations(source):

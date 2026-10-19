@@ -284,10 +284,11 @@ def _exec(check: ExecCheck, kube: Kube) -> tuple[bool, str]:
 
 
 def _can_i(check: CanICheck, kube: Kube) -> tuple[bool, str]:
-    groups = list(check.groups)
+    # Mirror the groups the authenticator would add for a real request.
+    groups = [*check.groups, "system:authenticated"]
     parts = check.user.split(":")
     if check.user.startswith("system:serviceaccount:") and len(parts) == 4:
-        groups += ["system:serviceaccounts", f"system:serviceaccounts:{parts[2]}", "system:authenticated"]
+        groups += ["system:serviceaccounts", f"system:serviceaccounts:{parts[2]}"]
     review = {
         "apiVersion": "authorization.k8s.io/v1",
         "kind": "SubjectAccessReview",

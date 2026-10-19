@@ -1,0 +1,67 @@
+id: workloads-002
+title: Roll back a stuck rollout
+domain: workloads
+objectives: [workloads/deployments, workloads/self-healing]
+difficulty: 2
+estimated_minutes: 5
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [media, search, cms]}
+  app: {choices: [thumbnailer, indexer, renderer]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}"}
+  - kubectl: [-n, "{{ns}}", set, image, "deployment/{{app}}", "nginx=docker.io/library/nginx:1.31-alpine"]
+  - kubectl: [-n, "{{ns}}", annotate, "deployment/{{app}}", "kubernetes.io/change-cause=upgrade to nginx 1.31", --overwrite]
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}"}
+  - kubectl: [-n, "{{ns}}", set, image, "deployment/{{app}}", "nginx=docker.io/library/nginx:1.31-alpine-hardened"]
+  - kubectl: [-n, "{{ns}}", annotate, "deployment/{{app}}", "kubernetes.io/change-cause=switch to hardened build", --overwrite]
+  - wait:
+      type: jsonpath
+      resource: "pods -l app={{app}}"
+      namespace: "{{ns}}"
+      jsonpath: "{.items[*].status.containerStatuses[*].state.waiting.reason}"
+      op: matches
+      value: "ErrImagePull|ImagePullBackOff"
+    timeout: 120
+
+checks:
+  - id: image
+    description: "Deployment runs the last working image again (nginx:1.31-alpine)"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+    op: matches
+    value: "(^|/)nginx:1\\.31-alpine$"
+  - id: available
+    description: "All 4 replicas updated and available"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 4
+    timeout: 60
+  - id: history-kept
+    description: "Rollback kept the revision history (revision ≥ 4)"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.annotations.deployment\\.kubernetes\\.io/revision}"
+    op: gte
+    value: "4"
+
+hints:
+  - "`kubectl -n {{ns}} rollout status deployment/{{app}}`: is the rollout progressing? Why are the new Pods not starting?"
+  - "`kubectl -n {{ns}} rollout history deployment/{{app}}` lists the revisions with their change-cause; `--revision=N` shows a revision's template."
+  - "`kubectl rollout undo` returns to the previous revision (or `--to-revision=N`). The previous revision is the one that worked."
+
+competencies:
+  - Reading rollout status and history
+  - Rolling back with kubectl rollout undo
+  - Recognising ImagePullBackOff during a rollout and why old Pods keep serving
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment
+  - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_undo/

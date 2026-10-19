@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{app}}
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: {{app}}
+          image: docker.io/library/busybox:1.37
+          command: ["sh", "-c", "echo log level ${LOG_LEVEL:-unset}; exec sleep infinity"]

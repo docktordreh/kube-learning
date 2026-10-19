@@ -1,0 +1,89 @@
+id: architecture-002
+title: Cluster-wide read access for an operations group
+domain: architecture
+objectives: [architecture/rbac]
+difficulty: 1
+estimated_minutes: 5
+backends: [kind, kubeadm]
+owned: ["clusterrole/{{role}}", "clusterrolebinding/{{role}}"]
+params:
+  group: {choices: [ops-oncall, sre-viewers, infra-audit]}
+  role: {choices: [node-storage-reader, infra-reader, capacity-viewer]}
+  user: {choices: [alex, sam, robin]}
+
+setup: []
+
+checks:
+  - id: clusterrole
+    description: "ClusterRole {{role}} exists"
+    type: exists
+    resource: "clusterrole/{{role}}"
+  - id: binding-subject
+    description: "ClusterRoleBinding {{role}} grants {{role}} to group {{group}}"
+    type: jsonpath
+    resource: "clusterrolebinding/{{role}}"
+    jsonpath: "{.roleRef.name} {.subjects[?(@.kind=='Group')].name}"
+    value: "{{role}} {{group}}"
+  - id: list-nodes
+    description: "{{group}} members can list nodes"
+    type: can_i
+    user: "{{user}}"
+    groups: ["{{group}}"]
+    verb: list
+    resource: nodes
+  - id: watch-pv
+    description: "{{group}} members can watch persistentvolumes"
+    type: can_i
+    user: "{{user}}"
+    groups: ["{{group}}"]
+    verb: watch
+    resource: persistentvolumes
+  - id: get-sc
+    description: "{{group}} members can get storageclasses"
+    type: can_i
+    user: "{{user}}"
+    groups: ["{{group}}"]
+    verb: get
+    api_group: storage.k8s.io
+    resource: storageclasses
+  - id: no-node-changes
+    role: guard
+    description: "{{group}} members cannot patch nodes"
+    type: can_i
+    user: "{{user}}"
+    groups: ["{{group}}"]
+    verb: patch
+    resource: nodes
+    allowed: false
+  - id: no-secrets
+    role: guard
+    description: "{{group}} members cannot list secrets in kube-system"
+    type: can_i
+    user: "{{user}}"
+    groups: ["{{group}}"]
+    verb: list
+    resource: secrets
+    namespace: kube-system
+    allowed: false
+  - id: user-alone-nothing
+    role: guard
+    description: "{{user}} without the group cannot list nodes (grant goes to the group)"
+    type: can_i
+    user: "{{user}}"
+    verb: list
+    resource: nodes
+    allowed: false
+
+hints:
+  - "Nodes, PersistentVolumes and StorageClasses are cluster-scoped, so you need a ClusterRole and a ClusterRoleBinding."
+  - "`kubectl create clusterrole {{role}} --verb=get,list,watch --resource=nodes,persistentvolumes,storageclasses.storage.k8s.io`"
+  - "`kubectl create clusterrolebinding {{role}} --clusterrole={{role}} --group={{group}}`; test with `kubectl auth can-i list nodes --as={{user}} --as-group={{group}}`."
+
+competencies:
+  - ClusterRoles for cluster-scoped resources
+  - Binding roles to groups rather than users
+  - Testing with impersonation (--as, --as-group)
+
+docs:
+  - https://kubernetes.io/docs/reference/access-authn-authz/rbac/#clusterrole-example
+  - https://kubernetes.io/docs/reference/access-authn-authz/authentication/#user-impersonation

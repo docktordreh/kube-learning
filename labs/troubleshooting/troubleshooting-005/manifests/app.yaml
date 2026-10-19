@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{app}}-logger
+  namespace: {{ns}}
+data:
+  run.sh: |
+    i=1
+    while [ $i -le 40 ]; do
+      if [ "$NAME" = "{{bad}}" ] && [ $((i % 7)) -eq 3 ]; then
+        echo "$(date -u +%FT%TZ) ERROR $NAME: upstream rejected request $i (code 50$((i % 4)))"
+      elif [ $((i % 9)) -eq 0 ]; then
+        echo "$(date -u +%FT%TZ) WARN $NAME: slow request $i, errors_total=0"
+      else
+        echo "$(date -u +%FT%TZ) INFO $NAME: handled request $i"
+      fi
+      i=$((i + 1))
+    done
+    exec sleep infinity
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+  labels:
+    app: {{app}}
+spec:
+  terminationGracePeriodSeconds: 1
+  volumes:
+    - name: logger
+      configMap:
+        name: {{app}}-logger
+  containers:
+    - name: web
+      image: docker.io/library/busybox:1.37
+      command: ["sh", "/opt/run.sh"]
+      env: [{name: NAME, value: web}]
+      volumeMounts: [{name: logger, mountPath: /opt}]
+    - name: auth
+      image: docker.io/library/busybox:1.37
+      command: ["sh", "/opt/run.sh"]
+      env: [{name: NAME, value: auth}]
+      volumeMounts: [{name: logger, mountPath: /opt}]
+    - name: cache
+      image: docker.io/library/busybox:1.37
+      command: ["sh", "/opt/run.sh"]
+      env: [{name: NAME, value: cache}]
+      volumeMounts: [{name: logger, mountPath: /opt}]
+    - name: session
+      image: docker.io/library/busybox:1.37
+      command: ["sh", "/opt/run.sh"]
+      env: [{name: NAME, value: session}]
+      volumeMounts: [{name: logger, mountPath: /opt}]

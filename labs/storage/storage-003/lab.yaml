@@ -1,0 +1,76 @@
+id: storage-003
+title: A StorageClass that keeps its data
+domain: storage
+objectives: [storage/storage-classes, storage/volumes]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind]
+namespaces: ["{{ns}}"]
+owned: ["storageclass/{{sc}}"]
+params:
+  ns: {choices: [finance, audit, compliance]}
+  sc: {choices: [retained-local, keep-local, local-retain]}
+  app: {choices: [auditlog, journal, evidence]}
+
+setup: []
+
+cleanup:
+  # Retained volumes outlive their claims; remove only PVs of this lab's own class.
+  - script: |
+      kubectl get pv -o jsonpath='{range .items[?(@.spec.storageClassName=="{{sc}}")]}{.metadata.name}{"\n"}{end}' \
+        | xargs -r kubectl delete pv --wait=false
+    ignore_errors: true
+
+checks:
+  - id: sc-spec
+    description: "StorageClass {{sc}}: rancher.io/local-path, Retain, WaitForFirstConsumer, expandable"
+    type: jsonpath
+    resource: "storageclass/{{sc}}"
+    jsonpath: "{.provisioner} {.reclaimPolicy} {.volumeBindingMode} {.allowVolumeExpansion}"
+    value: "rancher.io/local-path Retain WaitForFirstConsumer true"
+  - id: not-default
+    role: guard
+    description: "{{sc}} is not the default StorageClass; standard still is"
+    type: script
+    script: |
+      mine=$(kubectl get storageclass {{sc}} -o jsonpath='{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}' 2>/dev/null)
+      std=$(kubectl get storageclass standard -o jsonpath='{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}')
+      echo "{{sc}} default='$mine' standard default='$std'"
+      [ "$mine" != "true" ] && [ "$std" = "true" ]
+  - id: pvc-bound
+    description: "PVC {{app}}-data (1Gi) uses {{sc}} and is Bound"
+    type: jsonpath
+    resource: "pvc/{{app}}-data"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.storageClassName} {.status.phase}"
+    value: "{{sc}} Bound"
+    timeout: 60
+  - id: pv-retain
+    description: "The provisioned PV has reclaim policy Retain"
+    type: script
+    script: |
+      pv=$(kubectl -n {{ns}} get pvc {{app}}-data -o jsonpath='{.spec.volumeName}')
+      [ -n "$pv" ] || { echo "claim not bound"; exit 1; }
+      policy=$(kubectl get pv "$pv" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}')
+      echo "$pv reclaim policy: $policy"; [ "$policy" = Retain ]
+  - id: pod-ready
+    description: "Pod {{app}} mounts the claim and is Ready"
+    type: pods_ready
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    timeout: 60
+
+hints:
+  - "`kubectl get storageclass standard -o yaml` is a working example of a local-path class in this cluster."
+  - "The fields you need: `provisioner`, `reclaimPolicy`, `volumeBindingMode`, `allowVolumeExpansion`. Do not copy the `is-default-class` annotation."
+  - "With `WaitForFirstConsumer` the claim stays Pending until a Pod uses it. Create the PVC *and* a Pod (labelled `app={{app}}`) that mounts it."
+
+competencies:
+  - Writing StorageClasses
+  - Reclaim policy and volume binding mode semantics
+  - Default StorageClass annotation
+
+docs:
+  - https://kubernetes.io/docs/concepts/storage/storage-classes/
+  - https://kubernetes.io/docs/tasks/administer-cluster/change-default-storage-class/
+  - https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaim-policy

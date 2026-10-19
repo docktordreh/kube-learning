@@ -78,13 +78,14 @@ class Runner:
                 self.run_step(step, phase="cleanup")
             except CkaError as exc:
                 self.log(f"cleanup step failed (continuing): {exc}")
-        for item in self.lab.owned:
-            self.admin.kubectl(["delete", item, "--ignore-not-found", "--wait=true", "--timeout=120s"], timeout=150)
+        # Namespaces first: claims inside them must go before their PersistentVolumes can.
         if self.lab.namespaces:
             self.admin.kubectl(
                 ["delete", "namespace", "-l", f"{LAB_LABEL}={self.lab.id}", "--wait=true", "--timeout=180s"],
                 timeout=200,
             )
+        for item in self.lab.owned:
+            self.admin.kubectl(["delete", item, "--ignore-not-found", "--wait=true", "--timeout=120s"], timeout=150)
         # Only the lab's own work directory (paths.home()/work/<lab-id>), never a user path.
         shutil.rmtree(workdir(self.lab.id), ignore_errors=True)
 

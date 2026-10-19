@@ -1,0 +1,52 @@
+id: troubleshooting-005
+title: Find the failing container in a multi-container Pod
+domain: troubleshooting
+objectives: [troubleshooting/logs]
+difficulty: 1
+estimated_minutes: 5
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [sso, gateway, portal]}
+  app: {choices: [edge, frontdoor, login]}
+  bad: {choices: [auth, cache, session]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "app={{app}}"}
+
+checks:
+  - id: container
+    description: "{{workdir}}/container.txt names the failing container"
+    type: script
+    script: |
+      f="{{workdir}}/container.txt"
+      [ -f "$f" ] || { echo "$f does not exist"; exit 1; }
+      got=$(tr -d '[:space:]' < "$f")
+      echo "container.txt contains '$got'"
+      [ "$got" = "{{bad}}" ]
+  - id: errors
+    description: "{{workdir}}/errors.log holds exactly that container's ERROR lines"
+    type: script
+    script: |
+      f="{{workdir}}/errors.log"
+      [ -f "$f" ] || { echo "$f does not exist"; exit 1; }
+      expected=$(kubectl -n {{ns}} logs {{app}} -c {{bad}} | grep ERROR)
+      if diff <(printf '%s\n' "$expected") <(sed -e '$a\' "$f") >/dev/null; then
+        echo "$(wc -l < "$f") matching lines"
+      else
+        echo "content differs from: kubectl logs ... | grep ERROR"; exit 1
+      fi
+
+hints:
+  - "A Pod can have several containers; `kubectl -n {{ns}} get pod {{app}} -o jsonpath='{.spec.containers[*].name}'` lists them."
+  - "`kubectl logs <pod> -c <container>` reads one container's output. Add `--all-containers --prefix` to see everything at once."
+  - "Redirect the filtered output into the file: `kubectl -n {{ns}} logs {{app}} -c <name> | grep ERROR > {{workdir}}/errors.log`. Write only the container name into container.txt."
+
+competencies:
+  - Reading logs of a specific container
+  - Filtering container output streams into files
+
+docs:
+  - https://kubernetes.io/docs/concepts/cluster-administration/logging/
+  - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/
