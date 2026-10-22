@@ -24,7 +24,7 @@ from cka_labs.engine import catalog, selection
 from cka_labs.engine.exam import ExamService, ExamState, load_exam
 from cka_labs.engine.evaluator import CheckResult
 from cka_labs.engine.lifecycle import ActiveLab, LabService, find_cluster, load_session
-from cka_labs.engine.progress import HALF_LIFE_DAYS, Progress
+from cka_labs.engine.progress import HALF_LIFE_DAYS, Progress, readiness
 from cka_labs.errors import CkaError
 from cka_labs.models import DIFFICULTY_NAMES, Lab
 
@@ -572,12 +572,53 @@ def _pace(pace: float) -> str:
     return f"[{colour}]{pace:.1f}×[/{colour}]"
 
 
+def _check_description(lab_id: str, check_id: str) -> str:
+    """Unrendered description from lab.yaml (placeholders such as {{app}} stay visible)."""
+    try:
+        checks = catalog.get(lab_id).raw.get("checks")
+    except CkaError:
+        return ""
+    for check in checks if isinstance(checks, list) else []:
+        if isinstance(check, dict) and check.get("id") == check_id:
+            return str(check.get("description", ""))
+    return ""
+
+
+def _lab_history(progress: Progress, lab_id: str, as_json: bool) -> None:
+    catalog.get(lab_id)  # unknown lab -> CkaError
+    history = progress.lab_history(lab_id)
+    if as_json:
+        print(json.dumps(history, indent=2, default=str))
+        return
+    table = Table(header_style="bold", title=f"{lab_id} attempts")
+    for column in ("#", "started", "mode", "status", "min", "target", "hints", "solution", "checks", "failed checks"):
+        table.add_column(column)
+    for a in history:
+        table.add_row(
+            str(a["id"]),
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(a["started_at"])),
+            a["mode"],
+            a["status"],
+            f"{(a['ended_at'] - a['started_at']) / 60:.1f}" if a["ended_at"] is not None else "",
+            str(a["estimated_minutes"] or ""),
+            f"{a['hints_used']}/{a['hints_total']}" if a["hints_total"] is not None else str(a["hints_used"]),
+            "yes" if a["solution_viewed"] else "",
+            str(a["checks_run"]),
+            escape(", ".join(f"{check}×{n}" for check, n in a["failed_checks"].items())),
+        )
+    console.print(table if history else f"no attempts of {lab_id} yet")
+
+
 @app.command("progress")
 def progress_cmd(
+    lab_id: Annotated[str | None, typer.Argument(help="Show the attempt history of one lab")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Export everything as JSON")] = False,
 ) -> None:
-    """Show progress per curriculum objective and the weakest areas."""
+    """Show progress per curriculum objective, exam readiness and the most failed checks."""
     progress = Progress()
+    if lab_id is not None:
+        _lab_history(progress, lab_id, as_json)
+        return
     if as_json:
         print(json.dumps(progress.export(), indent=2, default=str))
         return
@@ -589,12 +630,22 @@ def progress_cmd(
     table = Table(
         header_style="bold",
         title="Objectives (weakness = 1 − (Σw·credit + 1)/(Σw + 2); hints cost up to 0.5 credit per pass; "
-        f"w halves every {HALF_LIFE_DAYS} days; pace = time to pass ÷ target)",
+        f"w halves every {HALF_LIFE_DAYS} days; pace = time to pass ÷ target; readiness = mean mastery, "
+        "mastery = max(0, 1 − 2·weakness))",
     )
     for column in ("objective", "labs", "attempts", "clean", "credit", "avg min", "pace", "hints", "weakness"):
         table.add_column(column)
+    weighted = total_weight = 0.0
     for domain in curriculum().domains:
-        table.add_row(f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "", "", "")
+        practisable = [f"{domain.id}/{key}" for key in domain.objectives if covered.get(f"{domain.id}/{key}")]
+        ready = readiness(stats, practisable)
+        if practisable:
+            weighted += domain.weight * ready
+            total_weight += domain.weight
+        table.add_row(
+            f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "", "",
+            f"[bold]ready {ready:.0%}[/bold]" if practisable else "",
+        )
         for key, title in domain.objectives.items():
             objective = f"{domain.id}/{key}"
             s = stats.get(objective)
@@ -612,9 +663,22 @@ def progress_cmd(
                 f"[{colour}]{weakness:.2f}[/{colour}]",
             )
     console.print(table)
+    if total_weight:
+        console.print(
+            f"[bold]Exam readiness: {weighted / total_weight:.0%}[/bold] "
+            "[dim](curriculum-weighted; objectives without labs are excluded)[/dim]"
+        )
     failed = progress.top_failed_checks(5)
     if failed:
-        console.print("[bold]Most failed checks:[/bold] " + ", ".join(f"{lab}:{check}×{n}" for lab, check, n in failed))
+        checks = Table(header_style="bold", title="Most failed checks (first try = knowledge gap; runs include retries)")
+        for column in ("lab", "check", "description", "first try", "attempts", "runs"):
+            checks.add_column(column)
+        for f in failed:
+            checks.add_row(
+                f.lab_id, f.check_id, escape(_check_description(f.lab_id, f.check_id)),
+                str(f.first_try), str(f.attempts), str(f.runs),
+            )
+        console.print(checks)
     exams = progress.exams()
     if exams:
         last = exams[-1]

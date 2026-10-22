@@ -60,6 +60,7 @@ cka practice --weakest
 cka practice --domain troubleshooting
 cka practice --difficulty advanced
 cka progress
+cka progress networking-003
 cka progress --json > progress.json
 #+end_src
 

@@ -7,6 +7,7 @@ toward 0 as recent credit accumulates and drifting back to 0.5 as results age.
 A pass earns 1 - HINT_PENALTY * hints_used / hints_total; a failure or a pass after viewing
 the solution earns 0. A pass without viewing the solution is *clean*.
 Pace is the mean of (time to pass / lab target time) over passes; it is informational only.
+Mastery = max(0, 1 - 2 * weakness); readiness of a set of objectives is their mean mastery.
 Stopping a practice lab within CANCEL_SECONDS without any check, hint or solution view
 marks the attempt *cancelled*; cancelled attempts are not counted.
 """
@@ -18,6 +19,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from cka_labs import paths
 from cka_labs.errors import CkaError
@@ -68,6 +70,8 @@ MIGRATIONS: list[tuple[str, ...]] = [
         "ALTER TABLE attempts ADD COLUMN hints_total INTEGER",
         "ALTER TABLE attempts ADD COLUMN estimated_minutes INTEGER",
     ),
+    # 2: whether a check failed on the attempt's first check run (NULL for older rows)
+    ("ALTER TABLE check_failures ADD COLUMN failed_first INTEGER",),
 ]
 
 
@@ -101,6 +105,28 @@ class ObjectiveStats:
     @property
     def weakness(self) -> float:
         return 1 - (self.weighted_credit + 1) / (self.weight + 2)
+
+    @property
+    def mastery(self) -> float:
+        """Net evidence of success in [0, 1]: 0 when untried or failing half the time, toward 1
+        as recent credit accumulates. Equals max(0, 1 - 2 * weakness)."""
+        return max(0.0, 1 - 2 * self.weakness)
+
+
+def readiness(stats: dict[str, ObjectiveStats], objectives: list[str]) -> float:
+    """Mean mastery over objectives; untried objectives count as 0."""
+    if not objectives:
+        return 0.0
+    return sum(stats[o].mastery if o in stats else 0.0 for o in objectives) / len(objectives)
+
+
+@dataclass(frozen=True)
+class FailedCheck:
+    lab_id: str
+    check_id: str
+    first_try: int  # attempts where it failed on the first check run (a knowledge gap)
+    attempts: int  # attempts where it failed at all
+    runs: int  # check runs where it failed (includes iteration)
 
 
 @dataclass(frozen=True)
@@ -186,16 +212,18 @@ class Progress:
 
     def record_check(self, attempt_id: int, failed_check_ids: list[str]) -> None:
         with self._connect() as conn:
-            cursor = conn.execute(
-                "UPDATE attempts SET checks_run = checks_run + 1 WHERE id = ? AND status = 'active'", (attempt_id,)
-            )
-            if not cursor.rowcount:
+            row = conn.execute(
+                "UPDATE attempts SET checks_run = checks_run + 1 WHERE id = ? AND status = 'active' RETURNING checks_run",
+                (attempt_id,),
+            ).fetchone()
+            if row is None:
                 return
+            first = int(row[0] == 1)
             for check_id in failed_check_ids:
                 conn.execute(
-                    "INSERT INTO check_failures (attempt_id, check_id, count) VALUES (?, ?, 1)"
+                    "INSERT INTO check_failures (attempt_id, check_id, count, failed_first) VALUES (?, ?, 1, ?)"
                     " ON CONFLICT(attempt_id, check_id) DO UPDATE SET count = count + 1",
-                    (attempt_id, check_id),
+                    (attempt_id, check_id, first),
                 )
 
     def record_hint(self, attempt_id: int) -> None:
@@ -281,14 +309,31 @@ class Progress:
             ).fetchall()
         return {r["lab_id"]: LabStats(r["lab_id"], r["attempts"], r["clean"] or 0, r["last"]) for r in rows}
 
-    def top_failed_checks(self, limit: int = 10) -> list[tuple[str, str, int]]:
+    def top_failed_checks(self, limit: int = 10) -> list[FailedCheck]:
+        """Checks ranked by first-try failures. Rows from before schema v2 count as first-try."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT a.lab_id, f.check_id, SUM(f.count) AS n FROM check_failures f"
-                " JOIN attempts a ON a.id = f.attempt_id GROUP BY a.lab_id, f.check_id ORDER BY n DESC LIMIT ?",
+                "SELECT a.lab_id, f.check_id, SUM(COALESCE(f.failed_first, 1)) AS first_try,"
+                " COUNT(*) AS attempts, SUM(f.count) AS runs"
+                " FROM check_failures f JOIN attempts a ON a.id = f.attempt_id GROUP BY a.lab_id, f.check_id"
+                " ORDER BY first_try DESC, attempts DESC, runs DESC, a.lab_id, f.check_id LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [(r["lab_id"], r["check_id"], r["n"]) for r in rows]
+        return [FailedCheck(r["lab_id"], r["check_id"], r["first_try"], r["attempts"], r["runs"]) for r in rows]
+
+    def lab_history(self, lab_id: str) -> list[dict[str, Any]]:
+        """Every attempt of one lab (including active and cancelled), oldest first."""
+        with self._connect() as conn:
+            attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts WHERE lab_id = ? ORDER BY id", (lab_id,))]
+            failures = conn.execute(
+                "SELECT f.attempt_id, f.check_id, f.count FROM check_failures f"
+                " JOIN attempts a ON a.id = f.attempt_id WHERE a.lab_id = ? ORDER BY f.check_id",
+                (lab_id,),
+            ).fetchall()
+        by_attempt: dict[int, dict[str, int]] = {}
+        for f in failures:
+            by_attempt.setdefault(f["attempt_id"], {})[f["check_id"]] = f["count"]
+        return [{**a, "failed_checks": by_attempt.get(a["id"], {})} for a in attempts]
 
     # --- exams ----------------------------------------------------------------------------
 

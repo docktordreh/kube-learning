@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from cka_labs.engine.progress import HALF_LIFE_DAYS, MIGRATIONS, SCHEMA, Progress
+from cka_labs.engine.progress import (
+    HALF_LIFE_DAYS,
+    MIGRATIONS,
+    SCHEMA,
+    FailedCheck,
+    ObjectiveStats,
+    Progress,
+    readiness,
+)
 from cka_labs.errors import CkaError
 
 DAY = 86400.0
@@ -67,7 +75,58 @@ def test_attempts_persist_across_instances(tmp_path: Path) -> None:
     second = Progress(db)
     stats = second.objective_stats()["networking/services"]
     assert (stats.attempts, stats.clean_passes, stats.hints) == (1, 1, 1)
-    assert second.top_failed_checks()[0] == ("networking-001", "traffic", 2)
+    assert second.top_failed_checks()[0] == FailedCheck("networking-001", "traffic", first_try=1, attempts=1, runs=2)
+
+
+def test_failed_checks_rank_first_try_over_retries(tmp_path: Path) -> None:
+    progress = Progress(tmp_path / "p.db")
+    for _ in range(2):
+        attempt = _attempt(progress, "networking-001", ["networking/services"])
+        progress.record_check(attempt, ["endpoints"])
+        for _ in range(3):
+            progress.record_check(attempt, ["traffic"])  # iteration after the first run
+    assert progress.top_failed_checks() == [
+        FailedCheck("networking-001", "endpoints", first_try=2, attempts=2, runs=2),
+        FailedCheck("networking-001", "traffic", first_try=0, attempts=2, runs=6),
+    ]
+
+
+def test_legacy_failures_count_as_first_try(tmp_path: Path) -> None:
+    progress = Progress(tmp_path / "p.db")
+    attempt = _attempt(progress, "networking-001", ["networking/services"])
+    progress.record_check(attempt, [])
+    progress.record_check(attempt, ["traffic"])
+    with sqlite3.connect(progress.db) as conn:
+        conn.execute("UPDATE check_failures SET failed_first = NULL")
+    assert progress.top_failed_checks()[0].first_try == 1
+
+
+def test_lab_history_lists_attempts_with_failures(tmp_path: Path) -> None:
+    progress = Progress(tmp_path / "p.db")
+    first = _attempt(progress, "networking-001", ["networking/services"])
+    progress.record_check(first, ["traffic", "endpoints"])
+    progress.finish_attempt(first, "failed")
+    _attempt(progress, "storage-001", ["storage/pv-pvc"])
+    second = _attempt(progress, "networking-001", ["networking/services"])
+    history = progress.lab_history("networking-001")
+    assert [h["id"] for h in history] == [first, second]
+    assert history[0]["failed_checks"] == {"endpoints": 1, "traffic": 1}
+    assert history[1]["failed_checks"] == {}
+
+
+def test_mastery_and_readiness() -> None:
+    def stats(weight: float, credit: float) -> ObjectiveStats:
+        return ObjectiveStats(
+            objective="x", attempts=int(weight), clean_passes=int(credit), credit=credit, weight=weight,
+            weighted_credit=credit, passes=int(credit), hints=0, avg_minutes=None, pace=None,
+        )
+
+    assert stats(1, 0).mastery == 0.0  # one failure
+    assert abs(stats(1, 1).mastery - 1 / 3) < 1e-9  # one clean pass
+    assert abs(stats(4, 4).mastery - 2 / 3) < 1e-9
+    known = {"a": stats(1, 1), "b": stats(4, 4)}
+    assert abs(readiness(known, ["a", "b", "untried"]) - (1 / 3 + 2 / 3) / 3) < 1e-9
+    assert readiness(known, []) == 0.0
 
 
 def test_weakness_formula(tmp_path: Path) -> None:
