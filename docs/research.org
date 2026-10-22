@@ -37,7 +37,8 @@ backend can model both a shared host kernel and an independent VM kernel.
 
 - No remote web service or paid-platform dependency.
 - No machine-learning recommendation system; weakness is a transparent
-  Laplace-smoothed failure rate.
+  Laplace-smoothed failure rate, with hint use reducing a pass's credit and
+  older results weighted less (21-day half-life).
 - No actual exam questions or claim of official scoring.
 - No Gateway controller in the first 22-lab catalog: it would add a large
   offline image dependency for one competency. The schema and curriculum map

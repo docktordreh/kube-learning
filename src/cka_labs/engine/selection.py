@@ -76,10 +76,10 @@ def weakest(labs: list[Lab], stats: dict[str, ObjectiveStats], lab_stats: dict[s
     attempted = [s for s in stats.values() if s.objective in covered]
     if not attempted:
         return recommend(labs, stats, lab_stats)
-    target = max(attempted, key=lambda s: (s.weakness, -s.clean_passes, s.objective))
+    target = max(attempted, key=lambda s: (s.weakness, -s.credit, s.objective))
     lab = min((lab for lab in labs if target.objective in lab.objectives), key=lambda lab: _tiebreak(lab, lab_stats))
     return Choice(
         lab,
-        f"weakest objective {target.objective}: {target.clean_passes}/{target.attempts} clean passes "
+        f"weakest objective {target.objective}: credit {target.credit:.1f} from {target.attempts} attempts "
         f"(weakness {target.weakness:.2f})",
     )

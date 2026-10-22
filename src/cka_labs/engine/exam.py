@@ -198,6 +198,8 @@ class ExamService:
                     domain=prepared.lab.domain,
                     objectives=prepared.lab.objectives,
                     difficulty=prepared.lab.difficulty,
+                    hints_total=len(prepared.lab.hints),
+                    estimated_minutes=prepared.lab.estimated_minutes,
                     exam_id=exam_id,
                 )
                 tasks.append(

@@ -31,7 +31,10 @@ LABS = [
 
 
 def stats(objective: str, attempts: int, clean: int) -> ObjectiveStats:
-    return ObjectiveStats(objective, attempts, clean, clean, 0, None)
+    return ObjectiveStats(
+        objective=objective, attempts=attempts, clean_passes=clean, credit=float(clean), weight=float(attempts),
+        weighted_credit=float(clean), passes=clean, hints=0, avg_minutes=None, pace=None,
+    )
 
 
 def test_filters() -> None:

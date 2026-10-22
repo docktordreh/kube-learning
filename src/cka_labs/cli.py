@@ -24,7 +24,7 @@ from cka_labs.engine import catalog, selection
 from cka_labs.engine.exam import ExamService, ExamState, load_exam
 from cka_labs.engine.evaluator import CheckResult
 from cka_labs.engine.lifecycle import ActiveLab, LabService, find_cluster, load_session
-from cka_labs.engine.progress import Progress
+from cka_labs.engine.progress import HALF_LIFE_DAYS, Progress
 from cka_labs.errors import CkaError
 from cka_labs.models import DIFFICULTY_NAMES, Lab
 
@@ -312,8 +312,10 @@ def lab_solution(
 def lab_reset() -> None:
     """Restore the lab's initial broken state (same scenario seed)."""
     service = LabService(log=log)
+    solved = service.require_session().solved
     session = service.reset()
-    console.print(f"[green]{session.lab_id} reset[/green]; the timer keeps running.")
+    note = "new attempt started" if solved else "the timer keeps running"
+    console.print(f"[green]{session.lab_id} reset[/green]; {note}.")
 
 
 @lab_app.command("stop")
@@ -565,6 +567,11 @@ def practice(
         _start(choice.lab.id, name, None)
 
 
+def _pace(pace: float) -> str:
+    colour = "red" if pace > 2 else "yellow" if pace > 1 else "green"
+    return f"[{colour}]{pace:.1f}×[/{colour}]"
+
+
 @app.command("progress")
 def progress_cmd(
     as_json: Annotated[bool, typer.Option("--json", help="Export everything as JSON")] = False,
@@ -579,11 +586,15 @@ def progress_cmd(
     for lab in all_labs():
         for objective in lab.objectives:
             covered[objective] = covered.get(objective, 0) + 1
-    table = Table(header_style="bold", title="Objectives (weakness = 1 − (clean passes + 1)/(attempts + 2))")
-    for column in ("objective", "labs", "attempts", "clean", "avg min", "hints", "weakness"):
+    table = Table(
+        header_style="bold",
+        title="Objectives (weakness = 1 − (Σw·credit + 1)/(Σw + 2); hints cost up to 0.5 credit per pass; "
+        f"w halves every {HALF_LIFE_DAYS} days; pace = time to pass ÷ target)",
+    )
+    for column in ("objective", "labs", "attempts", "clean", "credit", "avg min", "pace", "hints", "weakness"):
         table.add_column(column)
     for domain in curriculum().domains:
-        table.add_row(f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "")
+        table.add_row(f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "", "", "")
         for key, title in domain.objectives.items():
             objective = f"{domain.id}/{key}"
             s = stats.get(objective)
@@ -594,7 +605,9 @@ def progress_cmd(
                 str(covered.get(objective, 0)),
                 str(s.attempts if s else 0),
                 str(s.clean_passes if s else 0),
+                f"{s.credit:.1f}" if s else "0",
                 f"{s.avg_minutes:.1f}" if s and s.avg_minutes is not None else "",
+                _pace(s.pace) if s and s.pace is not None else "",
                 str(s.hints if s else 0),
                 f"[{colour}]{weakness:.2f}[/{colour}]",
             )
