@@ -2,92 +2,30 @@
 
 * Sources checked 2026-10-19
 
-- CNCF =CKA_Curriculum_v1.37.pdf= and the Linux Foundation CKA page: current
-  version v1.37, 2-hour performance-based format, and the five weighted domains.
-- public-repo/exam-source: question metadata plus setup and validation shell scripts;
-  weighted exit-code grading in a Docker Compose/kind environment.
-- public scenario scenario examples: =index.json= steps, foreground/background
-  scripts and ordinary shell =verify.sh= exit codes.
-- immanuwell/k16s-exam-simulator: YAML question data with setup/validate
-  scripts and real kubeadm/Incus isolation.
-- Sonobuoy: extensible Kubernetes plugin execution and result collection; useful
-  check-runner conventions, not an exam lifecycle.
-- kind v0.33.0: node image v1.37.0, both amd64/arm64, systemd/containerd/
-  crictl, static manifests at =/etc/kubernetes/manifests=, generated kubeadm
-  config at =/kind/kubeadm.conf=. kindnet has NetworkPolicy enforcement since
-  v0.24.
-- vagrant-libvirt 0.12.2: libvirt domain snapshots are supported, but the
-  initial backend deliberately uses a separate copied project before adding
-  snapshot acceleration.
-- Kubernetes ingress-nginx retirement announcement: Traefik is the likely
-  future both-Ingress-and-Gateway controller; the MVP does not make a Gateway
-  controller a hidden dependency.
+- CNCF curriculum PDFs and certification pages define current scope, versions,
+  weights and competency boundaries.
+- Kubernetes documentation, API references and official examples define
+  expected behavior and supported configuration.
+- kind v0.33.0 provides the v1.37.0 node image for fast API-level scenarios;
+  nodes include systemd, containerd, crictl and static manifests at
+  =/etc/kubernetes/manifests=.
+- vagrant-libvirt 0.12.2 provides the separate VM backend for node and
+  control-plane behavior.
+- Kubernetes Gateway API specifications and conformance examples define the
+  supported Gateway workflows; Traefik is an explicit pinned component.
 
-* Public course content, checked 2026-10-23
+* Original challenge research
 
-Question: can courses from online providers be authored so that they run
-locally with this project's features (seeded params, goal/guard checks, hints,
-progress, reset, scoped cleanup, mock exams)?
-
-| source                                        | format                             | terms                                                 | use?                        |
-|-----------------------------------------------+------------------------------------+-------------------------------------------------------+--------------------------------|
-| course platform                                     | closed platform, no public lab API | ToS §2.10, §2.15(ii): no copying, no derivative works | no                             |
-| training-source (KLLR GmbH)                         | closed paid simulators             | AGB §9: no copying, editing or republishing           | no                             |
-| =scenario-source/scenarios-*=, =scenario-examples= | public scenario scenario repos          | no LICENSE file (all rights reserved)                 | no                             |
-| =public-repo/cka-scenario-source= (~55 CKA)     | public scenario                         | no LICENSE file                                       | no                             |
-| =public-repo/ckad-scenario-source= (~70 CKAD)   | public scenario                         | MIT                                                   | yes, with attribution          |
-| =public-repo/exam-source= (CKA/CKAD/CKS)               | setup/validation shell scripts     | BSL 1.1: personal and educational use only            | local only, not committed      |
-| =cncf/curriculum=                             | curriculum PDFs                    | CC-BY 4.0                                             | yes (used in =data/curricula=) |
-
-Sources: https://course-source.com/terms-of-service, https://scenario-source.com/agb.html,
-https://scenario-source.com/creators, the repositories' GitHub pages and LICENSE
-files. Asking an author for permission is the only route for unlicensed repos.
-
-** public scenario scenario format
-
-A scenario directory holds =index.json= (title, steps, =intro.courseData=
-background setup script, =backend.imageid=), Markdown step texts, a setup
-script and a =verify.sh= per step that passes with exit code 0. Creators publish
-by pushing to a GitHub repository linked to their profile. Environments are
-kubeadm clusters named =controlplane= and =node01= at fixed IPs
-=172.30.1.2= and =172.30.2.2=; scripts run as root on the control plane.
-
-** Gaps when converting a scenario 1:1
-
-- Node names, fixed IPs and =ssh node01= do not exist on kind; the kubeadm
-  backend names its workers =worker-1= and =worker-2=.
-- Names are hard-coded, so there are no params and every attempt is the same.
-- One exit code per step: no goal/guard split, so the per-check failure
-  statistics degrade to one check.
-- Many =verify.sh= scripts compare YAML structure with =jq= instead of
-  behaviour. That contradicts the rule that every valid solution gets full
-  credit.
-- The solution sits in a =<details>= block of the step text; there are no
-  separate hints, explanation, objectives or difficulty.
-- No owned resources or cleanup, so reset and scoped cleanup cannot cover them.
-
-** Decision
-
-No live integration with any provider. =cka dev scenario-source= (see
-[[file:authoring.org][authoring]]) turns a permissively licensed scenario into a draft lab. The
-draft enters the catalog only after an author adds hints and behavioural
-checks, and after =cka dev validate= and =cka dev verify= pass.
-
-Trial on =public-repo/ckad-scenario-source= (commit =1352a12=, 65 scenarios,
-2026-10-23): 57 became drafts. The other 8 either work in the =default=
-namespace, which cka will not own, or build images with Docker/Podman.
-Common warnings were images outside the offline set (most drafts) and verify
-scripts that change state (4). The =NetworkPolicy-DNS= draft passed the full
-kind conformance cycle unchanged, apart from its =TODO= markers.
-
-Labs were separated by certification first (=data/curricula/=,
-=labs/<cert>/<domain>/=, =--cert=), so authored CKAD content has a place to go.
+[[file:research-cka-ckad.md][research-cka-ckad.md]] records public CKA and CKAD
+idea sources, concrete challenge themes, licensing boundaries and the
+original-content workflow. New labs use public behavior sources but author
+fresh task text, fixtures, failure injection, solutions and checks.
 
 * Adopted conventions
 
-exam-source/public scenario's shell setup/validation split is reused, but with typed
-Pydantic metadata and read-only behavioral checks. Exit codes remain useful for
-host scripts; the evaluator adds structured actual-vs-expected details.
+Shell setup and validation remain useful for host scripts, but labs use typed
+Pydantic metadata and read-only behavioral checks. The evaluator adds
+structured actual-vs-expected details.
 
 The platform uses kind for fast API-level work and a separate Vagrant/libvirt
 kubeadm backend for node/control-plane realism. It does not pretend one

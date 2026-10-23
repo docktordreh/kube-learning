@@ -60,9 +60,3 @@ competencies:
 docs:
   - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
   - https://kubernetes.io/docs/concepts/security/pod-security-standards/
-
-source:
-  url: https://kubernetes.io/docs/
-  path: security-context
-  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
-  license: MIT

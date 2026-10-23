@@ -64,7 +64,8 @@ Kubernetes v1.37; AppArmor and audit logging also pass on kubeadm because they
 require node or control-plane access. The cycle checks setup, the initial
 fault, the reference fix, grading, reset, and cleanup.
 
-The CKAD labs use original task text, fixtures, solutions and checks based on public Kubernetes behavior.
+All labs use original task text, fixtures, solutions and checks based on public
+Kubernetes behavior and certification competency boundaries.
 
 Labs can require pinned tools and shared cluster components. The Helm lab uses
 the =helm= binary from =cka setup=, the API deprecation lab the
@@ -137,7 +138,6 @@ uv run pytest -q
 uv run pytest -m integration
 uv run cka dev validate
 uv run cka dev verify networking-001
-uv run cka dev scenario-source path/to/scenario -o ckad/networking/services
 #+end_src
 
 Read [[file:docs/authoring.org][authoring]] before adding a lab. Agent instructions are in

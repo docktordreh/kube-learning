@@ -7,7 +7,6 @@ from cka_labs.config import objective_ids, toolchain
 from cka_labs.engine import catalog, components
 from cka_labs.engine.catalog import LabSource
 from cka_labs.engine.generator import DEFERRED_PREFIX, TOKEN
-from cka_labs.engine.importer import PERMISSIVE_LICENSES, TODO
 from cka_labs.errors import CkaError
 from cka_labs.models import ApplyStep
 
@@ -50,16 +49,6 @@ def validate_lab(source: LabSource) -> list[str]:
         problems.append(f"{prefix}: lives in labs/{home} but its primary objective is in {lab.domain}")
     known = objective_ids()
     problems += [f"{prefix}: unknown objective {o}" for o in lab.objectives if o not in known]
-    problems += [
-        f"{prefix}: unfinished import, {TODO} left in {name}"
-        for name in REQUIRED_FILES
-        if TODO in (source.directory / name).read_text()
-    ]
-    if lab.source is not None:
-        if lab.source.license not in PERMISSIVE_LICENSES:
-            problems.append(f"{prefix}: upstream license {lab.source.license} does not allow sharing this lab")
-        if not source.has("license notice"):
-            problems.append(f"{prefix}: licensed lab needs the upstream license text in license notice")
     if len(lab.hints) < MIN_HINTS:
         problems.append(f"{prefix}: needs at least {MIN_HINTS} progressive hints")
     problems += [f"{prefix}: docs must be https URLs: {d}" for d in lab.docs if not d.startswith("https://")]

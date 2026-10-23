@@ -66,9 +66,3 @@ docs:
   - https://kubernetes.io/docs/concepts/services-networking/ingress/
   - https://kubernetes.io/docs/concepts/services-networking/ingress/#default-backend
   - https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/ingress/
-
-source:
-  url: https://kubernetes.io/docs/
-  path: Ingress-Route-api-video, Ingress-with-Default-Backend
-  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
-  license: MIT

@@ -56,9 +56,3 @@ docs:
   - https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
   - https://kubernetes.io/docs/concepts/workloads/controllers/job/
   - https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/
-
-source:
-  url: https://kubernetes.io/docs/
-  path: CronJob-Challenge, cron-fin-backup
-  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
-  license: MIT

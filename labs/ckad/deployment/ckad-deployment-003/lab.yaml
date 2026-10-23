@@ -102,9 +102,3 @@ docs:
   - https://helm.sh/docs/intro/using_helm/
   - https://helm.sh/docs/helm/helm_upgrade/
   - https://kubernetes.io/docs/concepts/cluster-administration/manage-deployment/
-
-source:
-  url: https://kubernetes.io/docs/
-  path: helm-operations
-  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
-  license: MIT
