@@ -1,0 +1,76 @@
+id: cks-runtime-security-001
+title: Make running containers immutable
+objectives:
+  - cks/runtime-security/immutability
+  - ckad/environment/security-contexts
+difficulty: 2
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [runtime, hardened, production]}
+  app: {choices: [web, catalog, frontend]}
+  debug: {choices: [toolbox, debug-shell, ops-tools]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 1}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{debug}}", replicas: 1}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+
+checks:
+  - id: app-read-only
+    description: "{{app}} cannot write to its root filesystem"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "touch /probe 2>&1; true"]
+    output_matches: "Read-only file system"
+    timeout: 90
+  - id: debug-read-only
+    description: "{{debug}} cannot write to its root filesystem"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{debug}}"
+    command: [sh, -c, "touch /probe 2>&1; true"]
+    output_matches: "Read-only file system"
+    timeout: 90
+  - id: debug-unprivileged
+    description: "{{debug}} no longer runs privileged (no CAP_SYS_ADMIN)"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{debug}}"
+    command: [sh, -c, 'set -- $(grep CapEff /proc/1/status); echo "CapEff $2"; [ $(( 0x$2 & 0x200000 )) -eq 0 ]']
+    timeout: 90
+  - id: app-serves
+    role: guard
+    description: "http://{{app}} keeps answering"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", "http://{{app}}"]
+    output_matches: "^{{app}} ok$"
+    timeout: 90
+  - id: debug-available
+    role: guard
+    description: "Deployment {{debug}} keeps 1 ready replica"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{debug}}"
+    replicas: 1
+    timeout: 90
+
+hints:
+  - "Immutable means the container cannot change its own image content at runtime: `readOnlyRootFilesystem: true` in the container securityContext, and no `privileged` (which grants all capabilities and host devices). `kubectl -n {{ns}} get deploy -o yaml | grep -A3 securityContext` shows the current state."
+  - "{{app}} writes to /tmp when it starts. With a read-only root it crashes, so give it a writable scratch directory: an `emptyDir` volume mounted at `/tmp`. Watch `kubectl -n {{ns}} logs deploy/{{app}}` if it does not become ready."
+  - "Test from inside: `kubectl -n {{ns}} exec deploy/{{app}} -- touch /x` must fail with `Read-only file system`; `grep CapEff /proc/1/status` in {{debug}} should no longer show all bits set."
+
+competencies:
+  - Making containers immutable with readOnlyRootFilesystem
+  - Providing writable scratch space with emptyDir
+  - Removing privileged mode from a workload
+
+docs:
+  - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+  - https://kubernetes.io/docs/concepts/storage/volumes/#emptydir
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/

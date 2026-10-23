@@ -21,7 +21,7 @@ def test_lab_is_valid(lab_id: str) -> None:
     assert validate_lab(SOURCES[lab_id]) == []
 
 
-@pytest.mark.parametrize("cert", ["cka", "ckad"])
+@pytest.mark.parametrize("cert", sorted(curricula()))
 def test_every_domain_has_labs(cert: str) -> None:
     domains = {source.meta().domain_in(cert) for source in SOURCES.values()} - {None}
     assert domains == {d.id for d in curriculum(cert).domains}

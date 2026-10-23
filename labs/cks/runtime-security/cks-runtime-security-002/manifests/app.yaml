@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{secret}}
+  namespace: {{ns}}
+stringData:
+  password: not-a-real-password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{config}}
+  namespace: {{ns}}
+data:
+  mode: production

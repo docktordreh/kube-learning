@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+  labels:
+    app: {{app}}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: {{app}}
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: web
+          image: docker.io/library/nginx:1.30-alpine
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 2
+---
+# Scaled to 0: no Pod exists until someone scales it up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rogue
+  namespace: {{ns}}
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: rogue
+  template:
+    metadata:
+      labels:
+        app: rogue
+    spec:
+      containers:
+        - name: miner
+          image: ghcr.io/example/miner:1.0  # cka: unlisted-image (must never run)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}-tools
+  namespace: {{ns}}
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: {{app}}-tools
+  template:
+    metadata:
+      labels:
+        app: {{app}}-tools
+    spec:
+      initContainers:
+        - name: setup
+          image: quay.io/example/setup:1.0  # cka: unlisted-image (must never run)
+      containers:
+        - name: tools
+          image: docker.io/library/busybox:1.37
+          command: ["sleep", "infinity"]

@@ -54,4 +54,5 @@ images:
   - docker.io/library/busybox:1.37
   - docker.io/library/nginx:1.30-alpine
   - docker.io/library/nginx:1.31-alpine
+  - docker.io/library/nginx:1.31-alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d
   - docker.io/library/traefik:v3.7.16

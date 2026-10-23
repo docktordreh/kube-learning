@@ -9,17 +9,19 @@ name is the certification id used by =--cert=, =CKA_CERT= and objective ids.
 |--------+------+--------------------+------------+--------------+-------------------------|
 | =cka=  | CKA  | v1.37              | 2026-10-19 | hands-on     | every domain covered    |
 | =ckad= | CKAD | v1.37              | 2026-10-23 | hands-on     | every domain covered    |
-| =cks=  | CKS  | v1.34              | 2026-10-23 | hands-on     | RBAC and NetworkPolicy  |
+| =cks=  | CKS  | v1.34              | 2026-10-23 | hands-on     | every domain covered    |
 
 Lab metadata references stable objective ids such as
 =cka/networking/services= or =ckad/environment/configmaps=. It does not
 duplicate curriculum text. Tests check that every objective a lab names exists,
-that the weights of each certification sum to 100, and that every CKA and CKAD
-domain has at least one lab.
+that the weights of each certification sum to 100, and that every supported
+certification domain has at least one lab.
 
 Exam quotas follow the weights. Eight tasks split by largest remainder give
 CKA 2/1/2/1/2 and CKAD 2/2/1/2/1 (design-build, deployment, observability,
 environment, networking).
+CKS uses 1/1/1/2/2/1 (cluster setup, cluster hardening, system hardening,
+microservice vulnerabilities, supply chain, runtime security).
 
 * CKA
 
@@ -76,9 +78,12 @@ the newest CKS document there on 2026-10-23.
 | Supply Chain Security                    |    20% |
 | Monitoring, Logging and Runtime Security |    20% |
 
-A CKS mock exam needs labs in every domain first. Many objectives (AppArmor,
-seccomp, audit logs, CIS benchmark, binary verification) need node access and
-belong on the kubeadm backend.
+CKS coverage now includes NetworkPolicy and RBAC labs shared with CKA, plus
+original labs for Pod Security Standards, Secret delivery, seccomp and
+capability hardening, AppArmor, immutable containers, audit logging, registry
+allowlisting and digest pinning. The namespace-scoped set supports a full kind
+mock exam; AppArmor and audit logging remain kubeadm-only practice because
+they require node or control-plane access.
 
 * Certifications not modelled
 

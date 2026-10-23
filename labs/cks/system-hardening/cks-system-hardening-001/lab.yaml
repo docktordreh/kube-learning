@@ -1,0 +1,89 @@
+id: cks-system-hardening-001
+title: Confine a workload with an AppArmor profile
+objectives:
+  - cks/system-hardening/kernel-hardening
+difficulty: 3
+estimated_minutes: 12
+# Needs an AppArmor-enabled node kernel (the Ubuntu VMs); kind shares the host kernel.
+backends: [kubeadm]
+isolation: cluster
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [agents, monitoring, edge]}
+  app: {choices: [metrics-agent, log-agent, sensor]}
+  profile: {choices: [k8s-deny-etc-write, k8s-agent-readonly-etc, k8s-protect-etc]}
+
+setup:
+  - node: "{{node.worker1}}"
+    run: |
+      set -eu
+      cat > /etc/apparmor.d/cka-{{profile}} <<'EOF'
+      #include <tunables/global>
+
+      profile {{profile}} flags=(attach_disconnected,mediate_deleted) {
+        #include <abstractions/base>
+
+        capability,
+        network,
+        file,
+
+        # The agent may read its configuration but never change it.
+        deny /etc/** w,
+      }
+      EOF
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 1}
+
+cleanup:
+  - node: "{{node.worker1}}"
+    run: |
+      if [ -f /etc/apparmor.d/cka-{{profile}} ]; then
+        apparmor_parser --remove /etc/apparmor.d/cka-{{profile}} >/dev/null 2>&1 || true
+        rm -f /etc/apparmor.d/cka-{{profile}}
+      fi
+
+checks:
+  - id: profile-loaded
+    description: "Profile {{profile}} is loaded in enforce mode on {{node.worker1}}"
+    type: node_exec
+    node: "{{node.worker1}}"
+    run: "grep -E '^{{profile}} \\(enforce\\)$' /sys/kernel/security/apparmor/profiles"
+  - id: pod-confined
+    description: "The {{app}} container runs under {{profile}}"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "cat /proc/1/attr/apparmor/current 2>/dev/null || cat /proc/1/attr/current"]
+    output_matches: '^{{profile}} \(enforce\)'
+    timeout: 90
+  - id: etc-write-denied
+    description: "Writing below /etc in the container is denied"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "touch /etc/cka-probe 2>&1 && rm -f /etc/cka-probe; true"]
+    output_matches: "Permission denied"
+    timeout: 60
+  - id: available
+    role: guard
+    description: "Deployment {{app}} keeps 1 ready replica"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 1
+    timeout: 90
+
+hints:
+  - "The profile file is `/etc/apparmor.d/cka-{{profile}}` on {{node.worker1}} (`cka ssh {{node.worker1}}`). The kernel only enforces loaded profiles: `aa-status` or `/sys/kernel/security/apparmor/profiles` lists them, `apparmor_parser` loads one."
+  - "The Pod refers to a node profile by the name inside the file (`profile <name> ...`), not by file name: `securityContext.appArmorProfile: {type: Localhost, localhostProfile: <name>}`. The Pods must run on the node where the profile is loaded; the Deployment already pins them."
+  - "A Pod that references a profile the node has not loaded is rejected at start (`CreateContainerError` mentioning AppArmor). Load first, then roll out. Check from inside with `cat /proc/1/attr/apparmor/current`."
+
+competencies:
+  - Loading an AppArmor profile into the node kernel
+  - Applying a Localhost AppArmor profile to a workload
+  - Verifying the confinement of a running container
+
+docs:
+  - https://kubernetes.io/docs/tutorials/security/apparmor/
+  - https://kubernetes.io/docs/reference/node/apparmor/
+  - https://manpages.ubuntu.com/manpages/noble/man8/apparmor_parser.8.html

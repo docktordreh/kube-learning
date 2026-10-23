@@ -1,0 +1,106 @@
+id: cks-runtime-security-002
+title: Enable API server audit logging with a focused policy
+objectives:
+  - cks/runtime-security/audit-logs
+  - cka/troubleshooting/components
+difficulty: 4
+estimated_minutes: 20
+backends: [kind, kubeadm]
+isolation: cluster
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [finance, hr-data, payroll]}
+  secret: {choices: [db-credentials, api-token, signing-key]}
+  config: {choices: [app-settings, feature-flags, runtime-config]}
+
+setup:
+  - apply: manifests/app.yaml
+  - node: "{{node.controlplane}}"
+    run: |
+      set -eu
+      dir=/var/lib/cka-labs/{{lab.id}}
+      mkdir -p "$dir" /etc/kubernetes/audit
+      [ -f "$dir/kube-apiserver.yaml" ] || cp -a /etc/kubernetes/manifests/kube-apiserver.yaml "$dir/kube-apiserver.yaml"
+
+cleanup:
+  - node: "{{node.controlplane}}"
+    run: |
+      set -eu
+      backup=/var/lib/cka-labs/{{lab.id}}/kube-apiserver.yaml
+      if [ -f "$backup" ]; then
+        cmp -s "$backup" /etc/kubernetes/manifests/kube-apiserver.yaml || cp -a "$backup" /etc/kubernetes/manifests/kube-apiserver.yaml
+        rm -f "$backup"
+      fi
+      rm -rf /etc/kubernetes/audit /var/log/kubernetes/audit
+  - wait:
+      type: script
+      script: "kubectl --request-timeout=3s get --raw /readyz >/dev/null"
+    timeout: 240
+
+checks:
+  - id: apiserver-flags
+    description: "kube-apiserver runs with the audit policy, log path and rotation settings"
+    type: script
+    script: |
+      args=$(kubectl -n kube-system get pods -l component=kube-apiserver -o jsonpath='{.items[0].spec.containers[0].command}') || exit 1
+      for flag in --audit-policy-file=/etc/kubernetes/audit/policy.yaml --audit-log-path=/var/log/kubernetes/audit/audit.log \
+                  --audit-log-maxage=7 --audit-log-maxbackup=2; do
+        echo "$args" | grep -q -- "\"$flag\"" || { echo "missing $flag"; exit 1; }
+      done
+    timeout: 120
+  - id: secrets-metadata
+    description: "Reading Secret {{secret}} is logged at Metadata level, without the RequestReceived stage"
+    type: node_exec
+    node: "{{node.controlplane}}"
+    run: |
+      log=/var/log/kubernetes/audit/audit.log
+      kubectl --kubeconfig=/etc/kubernetes/admin.conf -n {{ns}} get secret {{secret}} >/dev/null || exit 1
+      sleep 2
+      events=$(grep '"resource":"secrets"' "$log" | grep '"name":"{{secret}}"' | tail -n 20)
+      echo "$events" | grep -q '"level":"Metadata"' || { echo "no Metadata event for the secret"; exit 1; }
+      ! echo "$events" | grep -q '"level":"Request' || { echo "secret events at Request/RequestResponse level"; exit 1; }
+      ! echo "$events" | grep -q '"stage":"RequestReceived"' || { echo "RequestReceived stage is logged"; exit 1; }
+    timeout: 120
+  - id: namespace-request-response
+    description: "Reading ConfigMap {{config}} in {{ns}} is logged at RequestResponse level"
+    type: node_exec
+    node: "{{node.controlplane}}"
+    run: |
+      kubectl --kubeconfig=/etc/kubernetes/admin.conf -n {{ns}} get configmap {{config}} >/dev/null || exit 1
+      sleep 2
+      grep '"resource":"configmaps"' /var/log/kubernetes/audit/audit.log | grep '"name":"{{config}}"' | tail -n 20 \
+        | grep -q '"level":"RequestResponse"'
+    timeout: 120
+  - id: nothing-else
+    description: "Requests outside those rules are not logged"
+    type: node_exec
+    node: "{{node.controlplane}}"
+    run: |
+      probe="cka-audit-probe-$$"
+      kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw "/api/v1/nodes?limit=1&labelSelector=$probe" >/dev/null || exit 1
+      sleep 2
+      [ -f /var/log/kubernetes/audit/audit.log ] || exit 1
+      ! grep -q "$probe" /var/log/kubernetes/audit/audit.log || { echo "a node list request was logged"; exit 1; }
+    timeout: 60
+  - id: api-ready
+    role: guard
+    description: "The API server answers /readyz"
+    type: script
+    script: "kubectl --request-timeout=5s get --raw /readyz"
+    timeout: 180
+
+hints:
+  - "An audit policy is a list of rules; the **first** matching rule decides the level (`None`, `Metadata`, `Request`, `RequestResponse`). Order matters: put the Secret rule before the namespace rule, and end with a catch-all `level: None`. `omitStages: [RequestReceived]` at the top level applies to every rule."
+  - "kube-apiserver reads the policy and writes the log inside its container: add `--audit-policy-file`, `--audit-log-path`, `--audit-log-maxage`, `--audit-log-maxbackup` to `/etc/kubernetes/manifests/kube-apiserver.yaml` and hostPath volumes plus volumeMounts for `/etc/kubernetes/audit` and `/var/log/kubernetes/audit`. Keep a copy of the manifest outside the manifests directory."
+  - "The kubelet restarts the static Pod when the manifest changes. If the API server does not come back, read its container log on the node: `crictl ps -a --name kube-apiserver`, then `crictl logs <id>`. A missing mount or a policy syntax error shows there."
+
+competencies:
+  - Writing an audit policy with ordered rules and omitted stages
+  - Configuring kube-apiserver audit flags, mounts and log rotation
+  - Recovering a static Pod after a broken manifest edit
+  - Verifying audit events in the log
+
+docs:
+  - https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+  - https://kubernetes.io/docs/reference/config-api/apiserver-audit.v1/
+  - https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/

@@ -25,6 +25,20 @@ def test_exam_selection_counts_labs_toward_their_ckad_domain() -> None:
     assert counts == {"design-build": 2, "deployment": 2, "observability": 1, "environment": 2, "networking": 1}
 
 
+def test_exam_selection_covers_cks_domains() -> None:
+    labs = [source.meta() for source in catalog.discover().values() if "kind" in source.meta().backends]
+    selected = _select(labs, 17, 8, "cks")
+    counts = {d: sum(lab.domain_in("cks") == d for lab in selected) for d in {lab.domain_in("cks") for lab in selected}}
+    assert counts == {
+        "cluster-setup": 1,
+        "cluster-hardening": 1,
+        "system-hardening": 1,
+        "microservice-vulnerabilities": 2,
+        "supply-chain": 2,
+        "runtime-security": 1,
+    }
+
+
 def test_exam_points_increase_with_difficulty() -> None:
     assert [_points(level) for level in range(1, 5)] == [5, 10, 15, 20]
 
