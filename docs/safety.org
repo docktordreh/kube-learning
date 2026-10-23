@@ -25,9 +25,11 @@ that the default kubeconfig has not appeared or changed.
 
 * Cluster components
 
-Components such as Traefik are shared add-ons, installed with Helm when a lab
-lists them in =requires=. The chart is pinned in =toolchain.yaml= and checked
-against its SHA-256 digest. Its images are part of the offline image set. The
+Components such as Traefik are shared add-ons, installed when a lab lists them
+in =requires=. A component is either a Helm chart (reinstalled only when the
+chart or its values change) or a manifest applied server-side, such as the
+Gateway API CRDs. Each is pinned in =toolchain.yaml= and checked against its
+SHA-256 digest. Their images are part of the offline image set. The
 install runs only after the cluster marker is verified. The component's
 namespace carries =cka-labs.io/component=<name>=, never the lab label, so lab
 cleanup and conformance leave it alone. It goes away with =cka cluster down=.

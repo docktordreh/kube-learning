@@ -102,6 +102,8 @@ backend can model both a shared host kernel and an independent VM kernel.
 - No actual exam questions or claim of official scoring.
 - No hidden controller dependency. Since 2026-10-23, controllers come as
   explicit, pinned cluster components (=requires: [traefik]=, see
-  [[file:safety.org][safety]]). Traefik 3.7 serves Ingress now. Its Gateway API provider needs
-  the Gateway API CRDs, which the chart does not ship. The CKA Gateway
-  objective still waits for that step.
+  [[file:safety.org][safety]]). Traefik 3.7 serves Ingress and the Gateway API. The Gateway API
+  CRDs (v1.6.3, the version in Traefik's =go.mod=) are a separate manifest
+  component, which Traefik requires. Traefik binds Gateway listeners to the
+  entrypoint with the same port, so listeners use port 8000. Port 80 is
+  rejected with =PortUnavailable=.

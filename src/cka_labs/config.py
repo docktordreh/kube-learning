@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cka_labs import paths
 from cka_labs.errors import CkaError
@@ -78,14 +78,29 @@ class HelmTools(_Frozen):
 
 
 class Component(_Frozen):
-    """A shared cluster add-on that labs request via `requires` (see engine/components.py)."""
+    """A shared cluster add-on that labs request via `requires` (see engine/components.py):
+    a Helm chart installed as `release` into `namespace`, or a manifest applied server-side."""
 
-    chart: str  # URL of the pinned chart archive
+    chart: str | None = None  # URL of the pinned chart archive
+    manifest: str | None = None  # URL of the pinned manifest
     sha256: str
-    release: str
-    namespace: str
-    images: list[str]
+    release: str = ""
+    namespace: str = ""
+    images: list[str] = []
     values: dict[str, Any] = {}
+    requires: list[str] = []  # components installed first
+
+    @model_validator(mode="after")
+    def _one_source(self) -> "Component":
+        if (self.chart is None) == (self.manifest is None):
+            raise ValueError("a component needs exactly one of chart or manifest")
+        if self.chart is not None and not (self.release and self.namespace):
+            raise ValueError("a chart component needs a release and a namespace")
+        return self
+
+    @property
+    def url(self) -> str:
+        return self.chart or self.manifest or ""
 
 
 class Toolchain(_Frozen):

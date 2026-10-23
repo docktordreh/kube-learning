@@ -14,8 +14,9 @@ uv sync
 uv run cka doctor
 #+end_src
 
-Install pinned tools (kind, kubectl, helm), cache the cluster component charts
-(Traefik), and cache the v1.37 node image and lab images:
+Install pinned tools (kind, kubectl, helm), cache the cluster components (the
+Traefik chart and the Gateway API CRD manifest), and cache the v1.37 node image
+and lab images:
 
 #+begin_src sh
 uv run cka setup

@@ -135,7 +135,7 @@ def setup(
     for download in tools.downloads():
         tools.install(download, log)
     for component in toolchain().components:
-        tools.cache_chart(component, log)
+        tools.cache_artifact(component, log)
     if images:
         tools.pull_images(log)
     console.print(f"[green]ready.[/green] Tools in {paths.bin_dir()}. Next: [bold]cka lab start[/bold]")

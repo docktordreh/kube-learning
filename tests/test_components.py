@@ -4,11 +4,13 @@ import hashlib
 import io
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from cka_labs import paths, proc, tools
-from cka_labs.config import toolchain
+from cka_labs.config import Component, toolchain
 from cka_labs.engine import catalog, components
 from cka_labs.errors import CkaError
 
@@ -37,8 +39,8 @@ def test_helm_is_pinned_and_extracted_from_its_tarball(monkeypatch: pytest.Monke
 def test_chart_cache_verifies_the_digest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools, "_fetch", lambda url: b"tampered")
     with pytest.raises(CkaError, match="checksum mismatch"):
-        tools.cache_chart("traefik", lambda _: None)
-    assert not tools.chart_path("traefik").exists()
+        tools.cache_artifact("traefik", lambda _: None)
+    assert not tools.artifact_path("traefik").exists()
 
 
 def test_component_images_are_in_the_offline_set() -> None:
@@ -58,6 +60,32 @@ def test_requirements() -> None:
         components.ensure(None, ["nope"], lambda _: None)  # type: ignore[arg-type]
     with pytest.raises(CkaError, match="helm is not installed"):
         components.ensure(None, ["helm"], lambda _: None)  # type: ignore[arg-type]
+
+
+def test_component_needs_exactly_one_source() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        Component.model_validate({"sha256": "x"})
+    with pytest.raises(ValidationError, match="release and a namespace"):
+        Component.model_validate({"chart": "https://x/c.tgz", "sha256": "x"})
+    assert Component.model_validate({"manifest": "https://x/m.yaml", "sha256": "x"}).url == "https://x/m.yaml"
+
+
+def test_dependencies_are_installed_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(components, "_apply_manifest", lambda cluster, name, log: calls.append(name))
+    monkeypatch.setattr(components, "_install_chart", lambda cluster, name, spec, log: calls.append(name))
+    components.ensure(None, ["traefik"], lambda _: None)  # type: ignore[arg-type]
+    assert calls == ["gateway-api", "traefik"]
+
+
+def test_dependency_cycles_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    looped = {
+        "a": Component(manifest="https://x/a.yaml", sha256="x", requires=["b"]),
+        "b": Component(manifest="https://x/b.yaml", sha256="x", requires=["a"]),
+    }
+    monkeypatch.setattr(components, "toolchain", lambda: SimpleNamespace(components=looped))
+    with pytest.raises(CkaError, match="cycle: a -> b -> a"):
+        components.ensure(None, ["a"], lambda _: None)  # type: ignore[arg-type]
 
 
 def test_labs_can_reference_their_own_directory() -> None:

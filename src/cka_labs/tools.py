@@ -96,21 +96,22 @@ def install(download: Download, log: Callable[[str], None]) -> None:
     log(f"installed {target} (sha256 {actual[:16]}…)")
 
 
-def chart_path(component: str) -> Path:
-    return paths.home() / "charts" / toolchain().components[component].chart.rsplit("/", 1)[-1]
-
-
-def cache_chart(component: str, log: Callable[[str], None]) -> Path:
-    """The component's pinned chart archive, downloaded once and verified against its digest."""
+def artifact_path(component: str) -> Path:
     spec = toolchain().components[component]
-    target = chart_path(component)
+    return paths.home() / "components" / component / spec.url.rsplit("/", 1)[-1]
+
+
+def cache_artifact(component: str, log: Callable[[str], None]) -> Path:
+    """The component's pinned chart or manifest, downloaded once and verified against its digest."""
+    spec = toolchain().components[component]
+    target = artifact_path(component)
     if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == spec.sha256:
         return target
-    log(f"downloading {spec.chart}")
-    payload = _fetch(spec.chart)
+    log(f"downloading {spec.url}")
+    payload = _fetch(spec.url)
     actual = hashlib.sha256(payload).hexdigest()
     if actual != spec.sha256:
-        raise CkaError(f"{component} chart: checksum mismatch (expected {spec.sha256}, got {actual})")
+        raise CkaError(f"{component}: checksum mismatch (expected {spec.sha256}, got {actual})")
     paths.ensure(target.parent)
     temporary = target.with_suffix(".partial")
     temporary.write_bytes(payload)

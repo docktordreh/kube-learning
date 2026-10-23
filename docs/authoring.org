@@ -37,8 +37,9 @@ Checks have two roles:
 
 A lab that needs a pinned tool or a shared cluster component lists it in
 =requires=: =helm= (the binary from =cka setup=) or a component from
-=toolchain.yaml= such as =traefik=. Components are installed once per cluster
-before the lab's setup. They never belong to a lab; do not list their
+=toolchain.yaml= such as =traefik= (Ingress and Gateway API controller; it
+pulls in =gateway-api=, the CRDs). Components are installed once per cluster
+before the lab's setup, dependencies first. They never belong to a lab; do not list their
 namespaces. Setup scripts can copy files shipped with the lab (for example a
 chart) from ={{lab.dir}}= into ={{workdir}}=.
 

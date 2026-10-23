@@ -24,19 +24,30 @@ kubeadm:
   network_prefix: 192.168.251
 # Shared cluster add-ons, installed with Helm when a lab lists them in `requires`.
 components:
+  gateway-api:
+    # Gateway API CRDs, standard channel. v1.6.3 is the version Traefik v3.7.16 is built
+    # against (its go.mod). The release publishes no checksum; digest recorded 2026-10-23.
+    manifest: https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
+    sha256: 356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5
   traefik:
-    # Ingress controller (default IngressClass "traefik"), reachable in-cluster at
-    # http://traefik.traefik.svc.cluster.local. Chart 42.1.3 = Traefik v3.7.16, digest from
-    # https://traefik.github.io/charts/index.yaml (verified 2026-10-23).
+    # Ingress and Gateway API controller: IngressClass and GatewayClass "traefik", reachable
+    # in-cluster at http://traefik.traefik.svc.cluster.local (port 80 -> entrypoint "web",
+    # container port 8000, which Gateway listeners must use). Chart 42.1.3 = Traefik v3.7.16,
+    # digest from https://traefik.github.io/charts/index.yaml (verified 2026-10-23).
     chart: https://traefik.github.io/charts/traefik/traefik-42.1.3.tgz
     sha256: 10ec2b032fd7ec9fa04a8816872e20ba0fafc47231f6394b5cb5d522f3b0ef50
     release: traefik
     namespace: traefik
+    requires: [gateway-api]
     images: [docker.io/library/traefik:v3.7.16]
     values:
       image: {registry: docker.io, repository: library/traefik, tag: v3.7.16}
       service: {spec: {type: ClusterIP}}
       ingressClass: {enabled: true, isDefaultClass: true, name: traefik}
+      providers: {kubernetesGateway: {enabled: true}}
+      gatewayClass: {enabled: true, name: traefik}
+      # Labs create their own Gateways.
+      gateway: {enabled: false}
 # Images used by lab manifests. `cka setup` pulls them once and loads them into the cluster,
 # so labs work offline. Labs may only reference images listed here (a test enforces it).
 images:
