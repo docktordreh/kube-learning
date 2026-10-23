@@ -62,3 +62,49 @@ The conformance report is the completion criterion. It must show intended
 failure, reference pass, reset restoration, and scoped cleanup. If a lab needs
 VM/kernel/control-plane operations, use =backends: [kubeadm]= or both and do
 not fake that behavior in kind.
+
+* authoring a public scenario scenario
+
+=cka dev scenario-source= turns one scenario directory into a draft lab. It
+reads files only and executes nothing.
+
+#+begin_src sh
+cka dev scenario-source path/to/repo/NetworkPolicy-DNS \
+    -o ckad/networking/network-policies -o cks/cluster-setup/network-policies
+#+end_src
+
+The first =-o= objective decides the directory. By default the draft goes to
+=<data dir>/drafts/<cert>/<domain>/<cert>-<domain>-NNN/=; use =--out= to pick
+another catalog root.
+
+What the draft contains:
+
+- the setup scripts as one host =script= step that starts in =$CKA_WORKDIR=;
+  if a script touches the node (=systemctl=, =crictl=, =/etc/kubernetes=,
+  =ssh= ...), it becomes a =node= step on the control plane and the lab is
+  cluster-isolated;
+- every =verify.sh= as a =script= goal check, run with the read-only grader;
+- the namespaces the setup creates (plus =--namespace=) as lab-owned, with
+  their creation rewritten so it does not re-apply the namespace and drop the
+  =cka-labs.io/lab= label. Namespaces the setup only uses, such as
+  =ingress-nginx=, are not owned, so cleanup never deletes them;
+- =task.md= from the intro and step texts without =<details>= blocks and
+  /Solution/ sections; =solution.sh= from the code blocks of those blocks;
+- a =source= entry (URL, path, commit, license) and =license notice=.
+
+Only MIT, Apache-2.0, BSD and CC-BY-4.0 content can be authored. =--private=
+allows other content for local use. Its output must stay outside every git
+repository, and =cka dev validate= rejects it.
+
+Finish a draft:
+
+1. Read the setup and check scripts before running anything. Host scripts run
+   as you, node scripts as root on a cluster node.
+2. Act on the printed warnings: images outside the offline set, =/root= paths,
+   verify scripts that change state (the grader is read-only), node access.
+3. Replace every =TODO= marker. Write hints, competencies and an
+   explanation. Prefer behavioural checks to scripts that compare YAML shape,
+   so that every valid solution gets full credit.
+4. Run =CKA_LABS_DIR=<drafts> cka dev validate= and
+   =CKA_LABS_DIR=<drafts> cka dev verify <id>=, then move the directory into
+   =labs/=.

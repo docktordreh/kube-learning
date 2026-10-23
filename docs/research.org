@@ -68,13 +68,17 @@ kubeadm clusters named =controlplane= and =node01= at fixed IPs
 
 ** Decision
 
-No live integration with any provider. A later =cka dev scenario-source=
-command may turn a permissively licensed scenario into a draft lab:
-=setup.sh= as a =script= step, =verify.sh= as one =script= goal check,
-=task.md= from the step text without the solution, =solution.sh= from the
-solution block, and the source repository, commit and license recorded. The
-draft enters the catalog only after an author adds objectives, hints and
-behavioural checks and =cka dev verify= passes.
+No live integration with any provider. =cka dev scenario-source= (see
+[[file:authoring.org][authoring]]) turns a permissively licensed scenario into a draft lab. The
+draft enters the catalog only after an author adds hints and behavioural
+checks, and after =cka dev validate= and =cka dev verify= pass.
+
+Trial on =public-repo/ckad-scenario-source= (commit =1352a12=, 65 scenarios,
+2026-10-23): 57 became drafts. The other 8 either work in the =default=
+namespace, which cka will not own, or build images with Docker/Podman.
+Common warnings were images outside the offline set (most drafts) and verify
+scripts that change state (4). The =NetworkPolicy-DNS= draft passed the full
+kind conformance cycle unchanged, apart from its =TODO= markers.
 
 Labs were separated by certification first (=data/curricula/=,
 =labs/<cert>/<domain>/=, =--cert=), so authored CKAD content has a place to go.

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import sys
 import time
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -316,6 +317,8 @@ def _debrief(service: LabService, session: ActiveLab, lab: Lab) -> None:
         console.print(Panel(Markdown(explanation), title="debrief", expand=False))
     console.print("[bold]Competencies:[/bold] " + "; ".join(lab.competencies))
     console.print("[bold]Docs:[/bold]\n  " + "\n  ".join(lab.docs))
+    if lab.source is not None:
+        console.print(f"[dim]Adapted from {escape(lab.source.url)} ({escape(lab.source.license)})[/dim]")
     console.print("[dim]Reference solution: cka lab solution · next: cka lab stop && cka lab start[/dim]")
 
 
@@ -760,6 +763,52 @@ def dev_verify(
             console.print(f"    {escape(line)}")
         failures += 0 if report.ok else 1
     raise typer.Exit(1 if failures else 0)
+
+
+import_app = typer.Typer(help="Draft labs from public scenario formats.", no_args_is_help=True)
+dev_app.add_typer(import_app, name="import")
+
+
+@import_app.command("scenario-source")
+def import_scenario-source(
+    scenario: Annotated[Path, typer.Argument(help="Scenario directory containing index.json")],
+    objective: Annotated[
+        list[str], typer.Option("--objective", "-o", help="Objective id, repeatable; the first decides cert/domain")
+    ],
+    lab_id: Annotated[str | None, typer.Option("--id", help="Lab id (default <cert>-<domain>-NNN)")] = None,
+    difficulty: Annotated[int, typer.Option(min=1, max=4, help="1-4")] = 2,
+    minutes: Annotated[int, typer.Option(min=1, max=60, help="Target minutes")] = 8,
+    namespace: Annotated[list[str] | None, typer.Option("--namespace", "-n", help="Extra lab-owned namespace")] = None,
+    out: Annotated[Path | None, typer.Option(help="Draft catalog root (default: <data dir>/drafts)")] = None,
+    private: Annotated[
+        bool, typer.Option("--private", help="Allow unlicensed content; the draft must stay outside git")
+    ] = False,
+) -> None:
+    """Turn a public scenario scenario into a draft lab. Nothing is executed."""
+    from cka_labs.engine.importer import import_scenario-source as run_import
+
+    root = (out or paths.home() / "drafts").expanduser().resolve()
+    draft = run_import(
+        scenario,
+        objectives=objective,
+        out=root,
+        lab_id=lab_id,
+        difficulty=difficulty,
+        minutes=minutes,
+        extra_namespaces=namespace,
+        private=private,
+    )
+    console.print(f"[green]draft {draft.lab_id}[/green] in {draft.directory} (upstream license: {draft.license})")
+    for warning in draft.warnings:
+        console.print(f"[yellow]![/yellow] {escape(warning)}")
+    console.print(
+        "\n[bold]Next[/bold]\n"
+        "  1. Read setup and checks in lab.yaml before running anything: setup runs on this host or a node.\n"
+        "  2. Replace the TODO markers; prefer behavioural checks over YAML-shape checks.\n"
+        f"  3. CKA_LABS_DIR={root} cka dev validate\n"
+        f"  4. CKA_LABS_DIR={root} cka dev verify {draft.lab_id}\n"
+        "  5. Move the directory into labs/ once both pass."
+    )
 
 
 def main() -> None:

@@ -119,6 +119,7 @@ uv run pytest -q
 uv run pytest -m integration
 uv run cka dev validate
 uv run cka dev verify networking-001
+uv run cka dev scenario-source path/to/scenario -o ckad/networking/services
 #+end_src
 
 Read [[file:docs/authoring.org][authoring]] before adding a lab. Agent instructions are in

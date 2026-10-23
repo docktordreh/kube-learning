@@ -211,6 +211,15 @@ class Param(_Strict):
     choices: list[str] = Field(min_length=1)
 
 
+class Source(_Strict):
+    """Upstream of an licensed lab: attribution and the license gate in `cka dev validate`."""
+
+    url: str
+    path: str = ""
+    commit: str = ""
+    license: str
+
+
 class Lab(_Strict):
     id: Annotated[str, Field(pattern=r"^[a-z]+(-[a-z]+)*-[0-9]{3}$")]
     title: str
@@ -232,6 +241,7 @@ class Lab(_Strict):
     competencies: list[str] = Field(min_length=1)
     docs: list[str] = Field(min_length=1)
     cleanup: list[Step] = []
+    source: Source | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "Lab":

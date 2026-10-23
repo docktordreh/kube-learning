@@ -2,6 +2,7 @@
 
 The same (lab, seed) always yields the same scenario, so reset reproduces it exactly.
 Rendering is strict: an unknown name is an authoring error, never an empty string.
+Go/Helm template fields such as {{.Names}} start with a dot and are left untouched.
 """
 
 import random
@@ -10,7 +11,7 @@ from collections.abc import Mapping
 
 from cka_labs.errors import CkaError
 
-TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_.]+)\s*\}\}")
+TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_][A-Za-z0-9_.]*)\s*\}\}")
 # Values only known after setup (see CaptureStep); left in place until grading.
 DEFERRED_PREFIX = "captured."
 
