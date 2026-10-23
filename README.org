@@ -54,9 +54,13 @@ ConfigMap in =kube-system=.
 
 * Labs and progress
 
-The catalog contains 22 labs across the five CKA domains. All 22 passed the
-real kind conformance cycle on Kubernetes v1.37. The cycle checks setup, the
-initial fault, the reference fix, grading, reset, and cleanup.
+The catalog contains 26 labs: 22 under =labs/cka/= covering the five CKA
+domains, and 4 under =labs/ckad/= for deployment strategies and security
+contexts. Many CKA labs also count for CKAD or CKS. All 26 passed the real kind
+conformance cycle on Kubernetes v1.37. The cycle checks setup, the initial
+fault, the reference fix, grading, reset, and cleanup.
+
+The CKAD labs use original task text, fixtures, solutions and checks based on public Kubernetes behavior.
 
 #+begin_src sh
 cka practice --weakest

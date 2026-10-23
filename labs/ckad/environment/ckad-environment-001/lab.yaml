@@ -1,0 +1,68 @@
+id: ckad-environment-001
+title: Least-privilege Pod with a read-only root filesystem
+objectives: [ckad/environment/security-contexts]
+difficulty: 2
+estimated_minutes: 7
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [security, payments, vault]}
+  pod: {choices: [secure-app-pod, ledger-worker, audit-agent]}
+  uid: {choices: ["1000", "1200", "2500"]}
+  gid: {choices: ["3000", "3100", "4000"]}
+
+checks:
+  - id: user
+    description: "Container app-container of Pod {{pod}} runs as UID {{uid}}"
+    type: exec
+    namespace: "{{ns}}"
+    pod: "{{pod}}"
+    container: app-container
+    command: [id, -u]
+    output_matches: "^{{uid}}$"
+    timeout: 60
+  - id: group
+    description: "Container app-container runs with primary GID {{gid}}"
+    type: exec
+    namespace: "{{ns}}"
+    pod: "{{pod}}"
+    container: app-container
+    command: [id, -g]
+    output_matches: "^{{gid}}$"
+    timeout: 30
+  - id: read-only-root
+    description: "Writing to / fails with a read-only file system"
+    type: exec
+    namespace: "{{ns}}"
+    pod: "{{pod}}"
+    container: app-container
+    command: [sh, -c, "touch /probe 2>&1; true"]
+    output_matches: "Read-only file system"
+    timeout: 30
+  - id: pod-level
+    description: "The Pod-level securityContext enforces runAsNonRoot, UID {{uid}} and GID {{gid}}"
+    type: jsonpath
+    resource: "pod/{{pod}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.securityContext.runAsNonRoot}/{.spec.securityContext.runAsUser}/{.spec.securityContext.runAsGroup}"
+    value: "true/{{uid}}/{{gid}}"
+
+hints:
+  - "There are two places for security settings: `spec.securityContext` (Pod, applies to all containers) and `spec.containers[].securityContext` (one container, wins on overlap). `kubectl explain pod.spec.securityContext` and `kubectl explain pod.spec.containers.securityContext` list the fields."
+  - "User, group and `runAsNonRoot` belong at Pod level; `readOnlyRootFilesystem` exists only at container level. `kubectl -n {{ns}} run {{pod}} --image=docker.io/library/busybox:1.37 --dry-run=client -o yaml -- sleep 3600` gives you a manifest to extend."
+  - "Check your result from inside: `kubectl -n {{ns}} exec {{pod}} -- id` and `kubectl -n {{ns}} exec {{pod}} -- touch /x`. Most securityContext fields are immutable on a running Pod, so delete and recreate it after a mistake."
+
+competencies:
+  - Setting user, group and runAsNonRoot in the Pod securityContext
+  - Making the container root filesystem read-only
+  - Verifying the effective identity from inside a container
+
+docs:
+  - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+
+source:
+  url: https://kubernetes.io/docs/
+  path: security-context
+  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
+  license: MIT

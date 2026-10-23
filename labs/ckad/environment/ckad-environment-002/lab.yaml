@@ -1,0 +1,109 @@
+id: ckad-environment-002
+title: Harden a Deployment with user, privilege escalation and capabilities
+objectives: [ckad/environment/security-contexts, ckad/deployment/rolling-updates]
+difficulty: 3
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [joker, gotham, arkham]}
+  app: {choices: [joker, riddler, penguin]}
+  uid: {choices: ["3000", "3100", "4100"]}
+
+setup:
+  - script: |
+      set -eu
+      cat > "{{workdir}}/{{app}}-deployment.yaml" <<'EOF'
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: {{app}}-deployment
+        namespace: {{ns}}
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: {{app}}
+        template:
+          metadata:
+            labels:
+              app: {{app}}
+          spec:
+            terminationGracePeriodSeconds: 1
+            containers:
+              - name: {{app}}-container
+                image: docker.io/library/busybox:1.37
+                command: ["sh", "-c"]
+                args:
+                  - |
+                    echo "user id: $(id -u)"
+                    grep -E '^(Cap|NoNewPrivs)' /proc/self/status
+                    while true; do sleep 30; done
+      EOF
+      kubectl apply -f "{{workdir}}/{{app}}-deployment.yaml"
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}-deployment", replicas: 2}
+
+checks:
+  - id: user
+    description: "{{app}}-deployment containers run as UID {{uid}}"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [id, -u]
+    output_matches: "^{{uid}}$"
+    timeout: 90
+  - id: no-privilege-escalation
+    description: "Privilege escalation is forbidden (no_new_privs is set)"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [grep, NoNewPrivs, /proc/1/status]
+    output_matches: "NoNewPrivs:\\s+1"
+    timeout: 60
+  - id: capabilities
+    description: "The capability bounding set contains NET_BIND_SERVICE, NET_RAW and NET_ADMIN"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command:
+      - sh
+      - -c
+      - 'set -- $(grep CapBnd /proc/1/status); echo "CapBnd $2"; [ $(( 0x$2 & 0x3400 )) -eq $(( 0x3400 )) ]'
+    timeout: 60
+  - id: manifest-saved
+    description: "The hardened manifest is saved as {{workdir}}/{{app}}-deployment-new.yaml"
+    type: script
+    script: |
+      f="{{workdir}}/{{app}}-deployment-new.yaml"
+      [ -s "$f" ] || { echo "$f is missing or empty"; exit 1; }
+      grep -q NET_ADMIN "$f" && grep -Eq 'allowPrivilegeEscalation"?: *false' "$f" \
+        || { echo "$f does not contain the new security settings"; exit 1; }
+  - id: available
+    role: guard
+    description: "{{app}}-deployment keeps 2 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}-deployment"
+    replicas: 2
+    timeout: 90
+
+hints:
+  - "The manifest is at `{{workdir}}/{{app}}-deployment.yaml`. All three requirements are container-level `securityContext` fields: `kubectl explain deployment.spec.template.spec.containers.securityContext`."
+  - "Copy the file to `{{app}}-deployment-new.yaml`, add `runAsUser`, `allowPrivilegeEscalation: false` and `capabilities.add` under the container, then `kubectl apply -f` it and watch `kubectl -n {{ns}} rollout status deploy/{{app}}-deployment`."
+  - "Verify from inside: `kubectl -n {{ns}} logs deploy/{{app}}-deployment` prints the user and the capability masks; `NoNewPrivs: 1` means escalation is blocked. Capability names in `add` have no `CAP_` prefix."
+
+competencies:
+  - Hardening a Deployment's container securityContext
+  - Adding Linux capabilities and forbidding privilege escalation
+  - Reading effective capabilities and no_new_privs from /proc
+
+docs:
+  - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-capabilities-for-a-container
+  - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+  - https://man7.org/linux/man-pages/man7/capabilities.7.html
+
+source:
+  url: https://kubernetes.io/docs/
+  path: joker-security-context
+  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
+  license: MIT
