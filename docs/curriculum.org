@@ -57,9 +57,10 @@ Primary source: https://github.com/cncf/curriculum/blob/master/CKAD_Curriculum_v
 
 CKAD coverage comes from shared CKA labs plus =labs/ckad/= (blue/green and
 canary releases, Helm releases, Ingress routing through Traefik, Pod and
-Deployment security contexts, CronJobs, DaemonSets, removed API versions).
-The remaining gap is "Define, build and modify container images": it needs an
-image builder, which neither the kind nodes nor the kubeadm VMs have.
+Deployment security contexts, CronJobs, DaemonSets, removed API versions,
+building and rolling out an image). Every CKAD domain has labs. The image lab
+builds with the host's Docker, as in the exam environment, and therefore runs
+on the kind backend only.
 
 * CKS
 

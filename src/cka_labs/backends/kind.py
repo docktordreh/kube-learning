@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import tempfile
+from pathlib import Path
 
 from cka_labs import paths, proc, tools
 from cka_labs.backends.base import Backend, Cluster
@@ -164,6 +165,10 @@ class KindCluster(Cluster):
                     timeout=900,
                     check=True,
                 )
+
+    def load_archive(self, archive: Path) -> None:
+        """Import an image archive (docker save, podman save, OCI) into every node."""
+        proc.run(["kind", "load", "image-archive", str(archive), f"--name={self.name}"], timeout=900, check=True)
 
     def _require_owned_container(self, container: str) -> None:
         """Only ever exec into containers that kind labelled as part of this cluster."""

@@ -90,3 +90,10 @@ def test_practice_dry_run_recommends_fundamentals() -> None:
     result = runner.invoke(app, ["practice", "--dry-run"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
     assert "why:" in result.output
+
+
+def test_image_load_needs_names_or_an_archive() -> None:
+    for args in (["image", "load"], ["image", "load", "x:1", "--archive", "x.tar"]):
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0
+        assert "not both" in str(result.exception)

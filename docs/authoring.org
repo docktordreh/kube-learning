@@ -43,6 +43,11 @@ before the lab's setup, dependencies first. They never belong to a lab; do not l
 namespaces. Setup scripts can copy files shipped with the lab (for example a
 chart) from ={{lab.dir}}= into ={{workdir}}=.
 
+Images built during a lab come from the host's Docker and reach kind nodes
+through =cka image load=; mark such manifest lines with =cka: unlisted-image=,
+use =imagePullPolicy: Never=, restrict the lab to =backends: [kind]=, and
+remove exactly those image names in =cleanup=.
+
 Prefer =service_endpoints=, =pods_ready=, traffic, RBAC
 SubjectAccessReviews, and mounted-file behavior over comparing submitted YAML.
 A valid alternative solution must receive full credit.

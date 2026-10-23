@@ -6,6 +6,7 @@ import re
 from cka_labs.config import objective_ids, toolchain
 from cka_labs.engine import catalog, components
 from cka_labs.engine.catalog import LabSource
+from cka_labs.engine.generator import DEFERRED_PREFIX, TOKEN
 from cka_labs.engine.importer import PERMISSIVE_LICENSES, TODO
 from cka_labs.errors import CkaError
 from cka_labs.models import ApplyStep
@@ -73,7 +74,7 @@ def validate_lab(source: LabSource) -> list[str]:
             rendered = source.load(values)
             for name in ("task.md", "solution.sh", "explanation.md"):
                 text = source.read(name, values)
-                if "{{" in text:
+                if any(m.group(1).startswith(DEFERRED_PREFIX) for m in TOKEN.finditer(text)):
                     problems.append(f"{prefix}: {name} references deferred values (captured.*)")
             for step in [*rendered.setup, *rendered.cleanup]:
                 if isinstance(step, ApplyStep):

@@ -1,9 +1,12 @@
 """Static validation of every lab in the catalog (schema, curriculum, files, images)."""
 
+from pathlib import Path
+
 import pytest
 
 from cka_labs.config import curricula, curriculum, toolchain
 from cka_labs.engine import catalog
+from cka_labs.engine.catalog import LabSource
 from cka_labs.engine.validation import normalise_image, validate_lab
 
 SOURCES = catalog.discover()
@@ -55,3 +58,20 @@ def test_cluster_isolated_labs_are_marked() -> None:
         touches_nodes = any(hasattr(step, "node") for step in [*lab.setup, *lab.cleanup])
         if touches_nodes:
             assert lab.isolation == "cluster", f"{lab.id} runs node steps but is namespace-isolated"
+
+
+def test_only_captured_tokens_count_as_deferred(tmp_path: Path) -> None:
+    """Go templates ({{.Config.User}}) may appear in student-facing files; {{captured.x}} may not."""
+    directory = tmp_path / "ckad" / "networking" / "ckad-networking-901"
+    directory.mkdir(parents=True)
+    (directory / "lab.yaml").write_text(
+        "id: ckad-networking-901\ntitle: t\nobjectives: [ckad/networking/services]\ndifficulty: 1\n"
+        "estimated_minutes: 5\nbackends: [kind]\nnamespaces: [x]\n"
+        "checks: [{id: a, description: d, type: exists, resource: pod/x, namespace: x}]\n"
+        "hints: ['1', '2', '3']\ncompetencies: [c]\ndocs: ['https://kubernetes.io']\n"
+    )
+    (directory / "task.md").write_text("docker inspect --format '{{.Config.User}}'\n")
+    (directory / "solution.sh").write_text("echo {{captured.secret}}\n")
+    (directory / "explanation.md").write_text("ok\n")
+    problems = validate_lab(LabSource("ckad-networking-901", directory))
+    assert problems == ["ckad-networking-901: solution.sh references deferred values (captured.*)"]

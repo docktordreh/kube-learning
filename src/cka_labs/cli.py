@@ -20,6 +20,7 @@ from rich.table import Table
 
 from cka_labs import paths, proc, tools
 from cka_labs.backends import Cluster, get_backend
+from cka_labs.backends.kind import KindCluster
 from cka_labs.config import DEFAULT_CERT, curricula, curriculum, toolchain
 from cka_labs.engine import catalog, selection
 from cka_labs.engine.exam import ExamService, ExamState, load_exam
@@ -40,12 +41,14 @@ lab_app = typer.Typer(help="Practice labs.", no_args_is_help=True)
 cluster_app = typer.Typer(help="Manage the disposable practice clusters.", no_args_is_help=True)
 node_app = typer.Typer(help="Node access (like `ssh` in the exam).", no_args_is_help=True)
 dev_app = typer.Typer(help="Lab authoring and verification.", no_args_is_help=True)
+image_app = typer.Typer(help="Container images you build for labs.", no_args_is_help=True)
 exam_app = typer.Typer(help="Timed mock examinations (no hints or solutions).", no_args_is_help=True)
 app.add_typer(lab_app, name="lab")
 app.add_typer(cluster_app, name="cluster")
 app.add_typer(node_app, name="node")
 app.add_typer(dev_app, name="dev")
 app.add_typer(exam_app, name="exam")
+app.add_typer(image_app, name="image")
 
 BackendOpt = Annotated[
     str | None, typer.Option("--backend", "-b", help="kind (default) or kubeadm; env CKA_BACKEND")
@@ -518,6 +521,53 @@ def _active_kubeconfig() -> str:
     if session:
         return str(find_cluster(session.backend, session.cluster).kubeconfig)
     return str(get_backend(backend_name(None)).main().kubeconfig)
+
+
+def _lab_cluster() -> Cluster:
+    """The cluster labs work on: CKA_CLUSTER (set for lab setup scripts), else the active exam's
+    or lab's cluster, else the backend's main cluster."""
+    if os.environ.get("CKA_CLUSTER"):
+        return find_cluster(backend_name(None), os.environ["CKA_CLUSTER"])
+    from cka_labs.engine import exam as exam_engine
+
+    exam = exam_engine.load_exam()
+    if exam is not None:
+        return get_backend(exam.backend).main()
+    session = load_session()
+    if session:
+        return find_cluster(session.backend, session.cluster)
+    return get_backend(backend_name(None)).main()
+
+
+@image_app.command("load")
+def image_load(
+    images: Annotated[list[str] | None, typer.Argument(help="Images in the host's Docker, e.g. myapp:2.0")] = None,
+    archive: Annotated[
+        Path | None, typer.Option(help="Load an image archive instead (docker save, podman save, OCI)")
+    ] = None,
+) -> None:
+    """Copy images you built on this host into every node of the lab cluster (kind backend).
+
+    Never pulls: an image missing from the host's Docker is an error. Pods then use it with
+    `imagePullPolicy: Never` or `IfNotPresent`."""
+    if bool(images) == (archive is not None):
+        raise CkaError("give image names or --archive, not both")
+    cluster = _lab_cluster()
+    if not isinstance(cluster, KindCluster):
+        raise CkaError("`cka image load` supports the kind backend only")
+    cluster.admin().verify_marker()
+    if archive is not None:
+        if not archive.is_file():
+            raise CkaError(f"{archive} is not a file")
+        cluster.load_archive(archive.resolve())
+        console.print(f"loaded {archive} into {cluster.name}")
+        return
+    names = images or []
+    missing = [name for name in names if not proc.run(["docker", "image", "inspect", name], timeout=30).ok]
+    if missing:
+        raise CkaError(f"not in the host's Docker: {', '.join(missing)} (build or pull it first)")
+    cluster.load_images(names)
+    console.print(f"loaded {', '.join(names)} into {cluster.name}")
 
 
 @app.command()
