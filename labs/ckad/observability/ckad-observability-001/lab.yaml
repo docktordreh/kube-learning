@@ -1,0 +1,153 @@
+id: ckad-observability-001
+title: Migrate a manifest off removed API versions
+objectives: [ckad/observability/api-deprecations, cka/architecture/lifecycle]
+difficulty: 3
+estimated_minutes: 12
+backends: [kind, kubeadm]
+requires: [kubectl-convert]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [viper, cobra, mamba]}
+  old_ns: {choices: [anaconda, legacy, archive]}
+  app: {choices: [ancient-tiger, old-lion, retro-bear]}
+
+setup:
+  - script: |
+      set -eu
+      cat > "{{workdir}}/{{app}}.yaml" <<'EOF'
+      apiVersion: apps/v1beta1
+      kind: Deployment
+      metadata:
+        name: {{app}}
+        namespace: {{old_ns}}
+      spec:
+        replicas: 3
+        rollbackTo:
+          revision: 1
+        template:
+          metadata:
+            labels:
+              app: {{app}}
+          spec:
+            containers:
+              - name: web
+                image: docker.io/library/nginx:1.30-alpine
+                ports:
+                  - containerPort: 80
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: {{app}}
+        namespace: {{old_ns}}
+      spec:
+        selector:
+          app: {{app}}
+        ports:
+          - port: 80
+      ---
+      apiVersion: policy/v1beta1
+      kind: PodDisruptionBudget
+      metadata:
+        name: {{app}}
+        namespace: {{old_ns}}
+      spec:
+        minAvailable: 2
+        selector:
+          matchLabels:
+            app: {{app}}
+      ---
+      apiVersion: batch/v1beta1
+      kind: CronJob
+      metadata:
+        name: {{app}}-report
+        namespace: {{old_ns}}
+      spec:
+        schedule: "0 * * * *"
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                  - name: report
+                    image: docker.io/library/busybox:1.37
+                    command: ["date"]
+      ---
+      apiVersion: networking.k8s.io/v1beta1
+      kind: Ingress
+      metadata:
+        name: {{app}}
+        namespace: {{old_ns}}
+      spec:
+        rules:
+          - host: {{app}}.example.test
+            http:
+              paths:
+                - path: /
+                  backend:
+                    serviceName: {{app}}
+                    servicePort: 80
+      EOF
+
+checks:
+  - id: manifest-current
+    description: "{{workdir}}/{{app}}.yaml uses only API versions this cluster serves"
+    type: script
+    script: |
+      out=$(kubectl apply --dry-run=client -f "{{workdir}}/{{app}}.yaml" -o name 2>&1) || { echo "$out" | grep -v '^ensure CRDs' | tail -n 3; exit 1; }
+  - id: manifest-namespace
+    description: "Every object in the manifest targets namespace {{ns}}"
+    type: script
+    script: |
+      namespaces=$(kubectl apply --dry-run=client -f "{{workdir}}/{{app}}.yaml" -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null)
+      echo "namespaces: ${namespaces:-?}"
+      [ "$(echo "$namespaces" | tr ' ' '\n' | sort -u)" = "{{ns}}" ] && [ "$(echo "$namespaces" | wc -w)" -eq 5 ]
+  - id: deployment-running
+    description: "Deployment {{app}} runs 3 ready replicas in {{ns}}"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 3
+    timeout: 90
+  - id: pdb-active
+    description: "PodDisruptionBudget {{app}} protects 2 of the Pods"
+    type: jsonpath
+    resource: "poddisruptionbudget/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.status.desiredHealthy}/{.status.expectedPods}"
+    value: "2/3"
+    timeout: 60
+  - id: cronjob-exists
+    description: "CronJob {{app}}-report exists in {{ns}}"
+    type: exists
+    resource: "cronjob/{{app}}-report"
+    namespace: "{{ns}}"
+  - id: ingress-backend
+    description: "Ingress {{app}} sends {{app}}.example.test to Service {{app}} port 80"
+    type: jsonpath
+    resource: "ingress/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.rules[0].http.paths[0].backend.service.name}:{.spec.rules[0].http.paths[0].backend.service.port.number}"
+    value: "{{app}}:80"
+
+hints:
+  - "`kubectl apply --dry-run=client -f {{workdir}}/{{app}}.yaml` names every kind whose version the server no longer serves. `kubectl api-resources` and `kubectl explain <kind>` show the current group/version, and the deprecation guide lists what changed."
+  - "`kubectl convert -f {{workdir}}/{{app}}.yaml > /tmp/fixed.yaml` (the plugin is on the PATH of `cka shell`) converts every object to its current version in one go. Check the result, change the namespace, then copy it back over the original file."
+  - "By hand: apps/v1 Deployments need `spec.selector` and lost `rollbackTo`; policy/v1 and batch/v1 keep the same fields; networking.k8s.io/v1 Ingress backends become `service: {name, port: {number}}` and every path needs a `pathType`."
+
+competencies:
+  - Recognising removed API versions from apply errors
+  - Converting manifests with kubectl convert or by hand
+  - Knowing the field changes between beta and GA APIs
+
+docs:
+  - https://kubernetes.io/docs/reference/using-api/deprecation-guide/
+  - https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#install-kubectl-convert-plugin
+  - https://kubernetes.io/docs/reference/using-api/#api-versioning
+
+source:
+  url: https://kubernetes.io/docs/
+  path: API-Deprecation-Plugin
+  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
+  license: MIT

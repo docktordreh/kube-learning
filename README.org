@@ -54,17 +54,18 @@ ConfigMap in =kube-system=.
 
 * Labs and progress
 
-The catalog contains 29 labs: 23 under =labs/cka/= covering the five CKA
-domains (including a Gateway API migration), and 6 under =labs/ckad/= for
-deployment strategies, Helm, Ingress and security contexts. Many labs count for
-more than one certification. All 29 passed the real kind conformance cycle on
-Kubernetes v1.37. The cycle checks setup, the initial
+The catalog contains 32 labs: 23 under =labs/cka/= covering the five CKA
+domains (including a Gateway API migration), and 9 under =labs/ckad/= for
+deployment strategies, Helm, Ingress, security contexts, CronJobs, DaemonSets
+and removed API versions. Many labs count for more than one certification. All
+32 passed the real kind conformance cycle on Kubernetes v1.37. The cycle checks setup, the initial
 fault, the reference fix, grading, reset, and cleanup.
 
 The CKAD labs use original task text, fixtures, solutions and checks based on public Kubernetes behavior.
 
 Labs can require pinned tools and shared cluster components. The Helm lab uses
-the =helm= binary from =cka setup=. The Ingress and Gateway API labs use
+the =helm= binary from =cka setup=, the API deprecation lab the
+=kubectl-convert= plugin. The Ingress and Gateway API labs use
 Traefik, which cka installs into the =traefik= namespace the first time a lab
 needs it, from a digest-checked chart and cached images. Traefik provides the
 IngressClass and GatewayClass =traefik=, and brings the pinned Gateway API CRDs

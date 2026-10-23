@@ -36,6 +36,17 @@ def test_helm_is_pinned_and_extracted_from_its_tarball(monkeypatch: pytest.Monke
     assert (paths.bin_dir() / "helm").read_bytes() == b"#!/bin/sh\necho helm\n"
 
 
+def test_kubectl_convert_matches_kubectl_and_records_its_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    convert = next(d for d in tools.downloads() if d.name == "kubectl-convert")
+    kubectl = next(d for d in tools.downloads() if d.name == "kubectl")
+    assert (convert.version, convert.url) == (kubectl.version, kubectl.url + "-convert")
+    files = {convert.url: b"bin", convert.sha256_url: hashlib.sha256(b"bin").hexdigest().encode()}
+    monkeypatch.setattr(tools, "_fetch", files.__getitem__)
+    assert tools.installed_version("kubectl-convert") is None
+    tools.install(convert, lambda _: None)
+    assert tools.installed_version("kubectl-convert") == convert.version
+
+
 def test_chart_cache_verifies_the_digest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools, "_fetch", lambda url: b"tampered")
     with pytest.raises(CkaError, match="checksum mismatch"):

@@ -1,0 +1,64 @@
+id: ckad-design-build-001
+title: CronJob with Job limits and a manual run
+objectives: [ckad/design-build/workload-resources, cka/workloads/self-healing]
+difficulty: 2
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [batch, reports, nightly]}
+  cron: {choices: [task-cron, report-cron, cleanup-cron]}
+
+checks:
+  - id: schedule
+    description: "CronJob {{cron}} runs every 5 minutes"
+    type: jsonpath
+    resource: "cronjob/{{cron}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.schedule}"
+    op: matches
+    value: '^(\*|0)/5 \* \* \* \*$'
+  - id: job-limits
+    description: "Jobs need 4 completions, 2 in parallel, 2 retries, a 60 s deadline, 1 h TTL and restartPolicy Never"
+    type: jsonpath
+    resource: "cronjob/{{cron}}"
+    namespace: "{{ns}}"
+    jsonpath: >-
+      {.spec.jobTemplate.spec.completions}/{.spec.jobTemplate.spec.parallelism}/{.spec.jobTemplate.spec.backoffLimit}/{.spec.jobTemplate.spec.activeDeadlineSeconds}/{.spec.jobTemplate.spec.ttlSecondsAfterFinished}/{.spec.jobTemplate.spec.template.spec.restartPolicy}
+    value: "4/2/2/60/3600/Never"
+  - id: manual-from-cronjob
+    description: "Job {{cron}}-manual was created from the CronJob"
+    type: jsonpath
+    resource: "job/{{cron}}-manual"
+    namespace: "{{ns}}"
+    jsonpath: '{.metadata.annotations.cronjob\.kubernetes\.io/instantiate}'
+    value: manual
+  - id: manual-complete
+    description: "Job {{cron}}-manual completed 4 Pods successfully"
+    type: jsonpath
+    resource: "job/{{cron}}-manual"
+    namespace: "{{ns}}"
+    jsonpath: "{.status.succeeded}"
+    value: "4"
+    timeout: 120
+
+hints:
+  - "A CronJob only creates Jobs; the Job spec (completions, parallelism, retries, deadline, TTL) lives under `spec.jobTemplate.spec`, the Pod spec one level deeper. `kubectl explain cronjob.spec.jobTemplate.spec` lists the fields."
+  - "`kubectl -n {{ns}} create cronjob {{cron}} --image=docker.io/library/busybox:1.37 --schedule='*/5 * * * *' --dry-run=client -o yaml -- /bin/sh -c 'echo Processing && sleep 5'` gives a skeleton. Add `completions`, `parallelism`, `backoffLimit`, `activeDeadlineSeconds` and `ttlSecondsAfterFinished`."
+  - "`kubectl -n {{ns}} create job {{cron}}-manual --from=cronjob/{{cron}}` starts a run now with the CronJob's template. Watch it with `kubectl -n {{ns}} get job,pods -w`."
+
+competencies:
+  - Writing a CronJob with Job completion and parallelism limits
+  - Bounding Job runtime and retries, and cleaning up finished Jobs
+  - Triggering a CronJob manually
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+  - https://kubernetes.io/docs/concepts/workloads/controllers/job/
+  - https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/
+
+source:
+  url: https://kubernetes.io/docs/
+  path: CronJob-Challenge, cron-fin-backup
+  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
+  license: MIT

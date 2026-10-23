@@ -10,9 +10,10 @@ def test_exam_selection_is_reproducible_and_weighted() -> None:
     first = _select(labs, 17, 8)
     second = _select(labs, 17, 8)
     assert [lab.id for lab in first] == [lab.id for lab in second]
-    counts = {domain: sum(lab.domain == domain for lab in first) for domain in {lab.domain for lab in first}}
-    assert counts == {
-        "cka/architecture": 2, "cka/workloads": 1, "cka/networking": 2, "cka/storage": 1, "cka/troubleshooting": 2,
+    # A lab counts toward its domain in the exam's certification, not its primary domain.
+    domains = [lab.domain_in("cka") for lab in first]
+    assert {d: domains.count(d) for d in set(domains)} == {
+        "architecture": 2, "workloads": 1, "networking": 2, "storage": 1, "troubleshooting": 2,
     }
 
 

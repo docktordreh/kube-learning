@@ -131,7 +131,7 @@ def show_task(lab: Lab, task: str, kubeconfig: str) -> None:
 def setup(
     images: Annotated[bool, typer.Option(help="Pull node and lab images for offline use")] = True,
 ) -> None:
-    """Install pinned kind, kubectl and helm into the cka directory and cache charts and images."""
+    """Install pinned kind, kubectl, kubectl-convert and helm, and cache components and images."""
     for download in tools.downloads():
         tools.install(download, log)
     for component in toolchain().components:
@@ -150,7 +150,7 @@ def doctor() -> None:
     table.add_row("data dir", str(paths.home()))
     for c in curricula().values():
         table.add_row(f"curriculum {c.id}", f"{c.exam}, Kubernetes v{c.kubernetes_version} (verified {c.verified})")
-    for name in ("kind", "kubectl", "helm"):
+    for name in ("kind", "kubectl", "kubectl-convert", "helm"):
         table.add_row(name, tools.installed_version(name) or "[red]missing (cka setup)[/red]")
     table.add_row("docker", "ok" if shutil.which("docker") and proc.run(["docker", "info"], timeout=20).ok else "[red]unavailable[/red]")
     table.add_row("/dev/kvm", "present" if os.path.exists("/dev/kvm") else "absent (kubeadm backend falls back to slow emulation)")

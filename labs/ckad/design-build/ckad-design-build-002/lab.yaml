@@ -1,0 +1,54 @@
+id: ckad-design-build-002
+title: Run a node agent on every node with a DaemonSet
+objectives: [ckad/design-build/workload-resources, cka/workloads/scheduling, ckad/design-build/volumes]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [logging, observability, node-agents]}
+  agent: {choices: [log-agent, node-collector, log-shipper]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{agent}}", replicas: 3}
+
+checks:
+  - id: deployment-replaced
+    description: "The Deployment {{agent}} is gone"
+    type: exists
+    resource: "deployment/{{agent}}"
+    namespace: "{{ns}}"
+    present: false
+  - id: one-per-node
+    description: "DaemonSet {{agent}} has one ready Pod on every node, control plane included"
+    type: script
+    script: |
+      nodes=$(kubectl get nodes --no-headers | wc -l)
+      ready=$(kubectl -n {{ns}} get daemonset {{agent}} -o jsonpath='{.status.numberReady}' 2>/dev/null)
+      echo "nodes: $nodes, ready agent Pods: ${ready:-none}"
+      [ "$ready" = "$nodes" ]
+    timeout: 90
+  - id: host-logs-read-only
+    description: "Pods see the node's /var/log at /host/log, read-only"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{agent}}"
+    # busybox `[ -w ]` is always true for root, so read the mount options instead.
+    command: [sh, -c, "ls /host/log >/dev/null && awk '$2 == \"/host/log\" {print $4}' /proc/mounts | grep -Eq '(^|,)ro(,|$)'"]
+    timeout: 60
+
+hints:
+  - "A Deployment spreads replicas wherever the scheduler likes, possibly several on one node and none on another. A DaemonSet runs exactly one Pod per eligible node. `kubectl -n {{ns}} get pods -o wide` shows where the agents run now."
+  - "There is no `kubectl create daemonset`: start from `kubectl -n {{ns}} get deploy {{agent}} -o yaml`, change the kind, drop `replicas` and `strategy`, add a `hostPath` volume for `/var/log` with a `readOnly: true` volumeMount at `/host/log`."
+  - "The control-plane node carries the taint `node-role.kubernetes.io/control-plane:NoSchedule` (`kubectl describe node | grep Taints`). Only Pods with a matching toleration land there."
+
+competencies:
+  - Choosing a DaemonSet for per-node agents
+  - Tolerating the control-plane taint
+  - Mounting a hostPath read-only
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/
+  - https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
+  - https://kubernetes.io/docs/concepts/storage/volumes/#hostpath

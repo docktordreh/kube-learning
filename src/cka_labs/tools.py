@@ -1,5 +1,5 @@
-"""Install pinned kind, kubectl and helm into the cka bin directory, cache component charts
-and pre-pull lab images.
+"""Install pinned kind, kubectl, kubectl-convert and helm into the cka bin directory, cache
+component artifacts and pre-pull lab images.
 
 Binaries are verified against the SHA-256 files published next to them by the upstream
 projects. Nothing is installed system-wide.
@@ -49,14 +49,22 @@ def downloads() -> list[Download]:
     return [
         Download("kind", tc.kind.version, kind_url, kind_url + ".sha256sum"),
         Download("kubectl", tc.kubectl.version, kubectl_url, kubectl_url + ".sha256"),
+        Download("kubectl-convert", tc.kubectl.version, kubectl_url + "-convert", kubectl_url + "-convert.sha256"),
         Download("helm", tc.helm.version, helm_url, helm_url + ".sha256sum", f"{system}-{machine}/helm"),
     ]
+
+
+def _version_file(name: str) -> Path:
+    return paths.bin_dir() / f".{name}.version"
 
 
 def installed_version(name: str) -> str | None:
     binary = paths.bin_dir() / name
     if not binary.is_file():
         return None
+    if name == "kubectl-convert":  # has no version command; install() records it
+        version_file = _version_file(name)
+        return version_file.read_text().strip() if version_file.is_file() else None
     argv = {"kind": [str(binary), "version"], "helm": [str(binary), "version", "--short"]}.get(
         name, [str(binary), "version", "--client"]
     )
@@ -93,6 +101,7 @@ def install(download: Download, log: Callable[[str], None]) -> None:
     temporary.write_bytes(payload)
     temporary.chmod(0o755)
     temporary.replace(target)
+    _version_file(download.name).write_text(download.version + "\n")
     log(f"installed {target} (sha256 {actual[:16]}…)")
 
 

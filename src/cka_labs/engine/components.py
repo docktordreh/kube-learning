@@ -1,7 +1,7 @@
 """Lab requirements: pinned tools and shared cluster add-ons.
 
 A lab lists what it needs in `requires`:
-- a tool (`helm`): the pinned binary that `cka setup` installs must be present;
+- a tool (`helm`, `kubectl-convert`): the pinned binary that `cka setup` installs must be present;
 - a component from toolchain.yaml (`traefik`, `gateway-api`), installed once per cluster
   from a pinned, digest-checked artifact after its own `requires`. Chart components are
   Helm releases (reinstalled when chart or values change); manifest components are
@@ -20,7 +20,7 @@ from cka_labs.backends.base import Cluster
 from cka_labs.config import Component, toolchain
 from cka_labs.errors import CkaError
 
-TOOLS = ("helm",)
+TOOLS = ("helm", "kubectl-convert")
 COMPONENT_LABEL = "cka-labs.io/component"
 
 Log = Callable[[str], None]

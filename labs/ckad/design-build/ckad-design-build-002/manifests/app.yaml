@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{agent}}
+  namespace: {{ns}}
+  labels:
+    app: {{agent}}
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: {{agent}}
+  template:
+    metadata:
+      labels:
+        app: {{agent}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: agent
+          image: docker.io/library/busybox:1.37
+          command: ["sh", "-c", "while true; do ls /var/log | wc -l; sleep 60; done"]
