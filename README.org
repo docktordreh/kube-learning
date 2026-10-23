@@ -54,13 +54,18 @@ ConfigMap in =kube-system=.
 
 * Labs and progress
 
-The catalog contains 26 labs: 22 under =labs/cka/= covering the five CKA
-domains, and 4 under =labs/ckad/= for deployment strategies and security
-contexts. Many CKA labs also count for CKAD or CKS. All 26 passed the real kind
-conformance cycle on Kubernetes v1.37. The cycle checks setup, the initial
+The catalog contains 28 labs: 22 under =labs/cka/= covering the five CKA
+domains, and 6 under =labs/ckad/= for deployment strategies, Helm, Ingress and
+security contexts. Many labs count for more than one certification. All 28
+passed the real kind conformance cycle on Kubernetes v1.37. The cycle checks setup, the initial
 fault, the reference fix, grading, reset, and cleanup.
 
 The CKAD labs use original task text, fixtures, solutions and checks based on public Kubernetes behavior.
+
+Labs can require pinned tools and shared cluster components. The Helm lab uses
+the =helm= binary from =cka setup=. The Ingress lab uses Traefik, which cka
+installs into the =traefik= namespace the first time a lab needs it, from a
+digest-checked chart and cached images.
 
 #+begin_src sh
 cka practice --weakest

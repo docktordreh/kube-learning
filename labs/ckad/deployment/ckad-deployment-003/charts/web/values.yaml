@@ -1,0 +1,8 @@
+replicaCount: 1
+image:
+  repository: docker.io/library/nginx
+  # Defaults to "<appVersion>-alpine".
+  tag: ""
+service:
+  type: ClusterIP
+  port: 80

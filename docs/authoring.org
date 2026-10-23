@@ -35,6 +35,13 @@ Checks have two roles:
 - =guard=: must pass immediately after setup and remain true, catching
   collateral changes or a security-policy weakening.
 
+A lab that needs a pinned tool or a shared cluster component lists it in
+=requires=: =helm= (the binary from =cka setup=) or a component from
+=toolchain.yaml= such as =traefik=. Components are installed once per cluster
+before the lab's setup. They never belong to a lab; do not list their
+namespaces. Setup scripts can copy files shipped with the lab (for example a
+chart) from ={{lab.dir}}= into ={{workdir}}=.
+
 Prefer =service_endpoints=, =pods_ready=, traffic, RBAC
 SubjectAccessReviews, and mounted-file behavior over comparing submitted YAML.
 A valid alternative solution must receive full credit.

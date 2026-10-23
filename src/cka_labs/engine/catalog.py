@@ -52,6 +52,7 @@ class LabSource:
         values = choose_params(self.id, self.param_choices, seed)
         values.update({f"node.{logical}": actual for logical, actual in nodes.items()})
         values["lab.id"] = self.id
+        values["lab.dir"] = str(self.directory)
         values["workdir"] = str(workdir(self.id))
         return values
 
@@ -73,6 +74,7 @@ class LabSource:
         values = dict(params) if params is not None else {n: c[0] for n, c in self.param_choices.items()}
         values.update(PLACEHOLDER_NODES)
         values["lab.id"] = self.id
+        values["lab.dir"] = str(self.directory)
         values["workdir"] = str(workdir(self.id))
         return values
 

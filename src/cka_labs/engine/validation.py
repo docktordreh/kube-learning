@@ -4,7 +4,7 @@ import itertools
 import re
 
 from cka_labs.config import objective_ids, toolchain
-from cka_labs.engine import catalog
+from cka_labs.engine import catalog, components
 from cka_labs.engine.catalog import LabSource
 from cka_labs.engine.importer import PERMISSIVE_LICENSES, TODO
 from cka_labs.errors import CkaError
@@ -62,6 +62,7 @@ def validate_lab(source: LabSource) -> list[str]:
     if len(lab.hints) < MIN_HINTS:
         problems.append(f"{prefix}: needs at least {MIN_HINTS} progressive hints")
     problems += [f"{prefix}: docs must be https URLs: {d}" for d in lab.docs if not d.startswith("https://")]
+    problems += [f"{prefix}: unknown requirement {r}" for r in lab.requires if r not in components.known()]
     if lab.isolation == "namespace" and not (lab.namespaces or lab.owned):
         problems.append(f"{prefix}: namespace-isolated labs must declare the namespaces or resources they own")
 

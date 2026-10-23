@@ -20,7 +20,7 @@ from rich.table import Table
 
 from cka_labs import paths, proc, tools
 from cka_labs.backends import Cluster, get_backend
-from cka_labs.config import DEFAULT_CERT, curricula, curriculum
+from cka_labs.config import DEFAULT_CERT, curricula, curriculum, toolchain
 from cka_labs.engine import catalog, selection
 from cka_labs.engine.exam import ExamService, ExamState, load_exam
 from cka_labs.engine.evaluator import CheckResult
@@ -131,9 +131,11 @@ def show_task(lab: Lab, task: str, kubeconfig: str) -> None:
 def setup(
     images: Annotated[bool, typer.Option(help="Pull node and lab images for offline use")] = True,
 ) -> None:
-    """Install pinned kind + kubectl into the cka directory and cache images."""
+    """Install pinned kind, kubectl and helm into the cka directory and cache charts and images."""
     for download in tools.downloads():
         tools.install(download, log)
+    for component in toolchain().components:
+        tools.cache_chart(component, log)
     if images:
         tools.pull_images(log)
     console.print(f"[green]ready.[/green] Tools in {paths.bin_dir()}. Next: [bold]cka lab start[/bold]")
@@ -148,7 +150,7 @@ def doctor() -> None:
     table.add_row("data dir", str(paths.home()))
     for c in curricula().values():
         table.add_row(f"curriculum {c.id}", f"{c.exam}, Kubernetes v{c.kubernetes_version} (verified {c.verified})")
-    for name in ("kind", "kubectl"):
+    for name in ("kind", "kubectl", "helm"):
         table.add_row(name, tools.installed_version(name) or "[red]missing (cka setup)[/red]")
     table.add_row("docker", "ok" if shutil.which("docker") and proc.run(["docker", "info"], timeout=20).ok else "[red]unavailable[/red]")
     table.add_row("/dev/kvm", "present" if os.path.exists("/dev/kvm") else "absent (kubeadm backend falls back to slow emulation)")

@@ -2,6 +2,7 @@
 
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -72,10 +73,27 @@ class KubeadmTools(_Frozen):
     network_prefix: str
 
 
+class HelmTools(_Frozen):
+    version: str
+
+
+class Component(_Frozen):
+    """A shared cluster add-on that labs request via `requires` (see engine/components.py)."""
+
+    chart: str  # URL of the pinned chart archive
+    sha256: str
+    release: str
+    namespace: str
+    images: list[str]
+    values: dict[str, Any] = {}
+
+
 class Toolchain(_Frozen):
     kind: KindTools
     kubectl: KubectlTools
+    helm: HelmTools
     kubeadm: KubeadmTools
+    components: dict[str, Component] = {}
     images: list[str]
 
 

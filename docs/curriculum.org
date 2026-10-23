@@ -56,12 +56,9 @@ Primary source: https://github.com/cncf/curriculum/blob/master/CKAD_Curriculum_v
 | Services and Networking                             |    20% |
 
 CKAD coverage comes from shared CKA labs plus =labs/ckad/= (blue/green and
-canary releases, Pod and Deployment security contexts). Gaps without a lab:
-container images, workload resource choice (DaemonSet, CronJob), Helm, API
-deprecations and Ingress. Helm and Ingress need a decision first: the
-candidate scenarios install Helm, charts and ingress controllers from the
-internet, which the offline image set and the "no hidden controller" rule in
-[[file:research.org][research]] exclude.
+canary releases, Helm releases, Ingress routing through Traefik, Pod and
+Deployment security contexts). Gaps without a lab: container images, workload
+resource choice (DaemonSet, CronJob) and API deprecations.
 
 * CKS
 

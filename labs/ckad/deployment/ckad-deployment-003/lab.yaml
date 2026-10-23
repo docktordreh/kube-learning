@@ -1,0 +1,110 @@
+id: ckad-deployment-003
+title: Uninstall, upgrade and install Helm releases
+objectives: [ckad/deployment/helm, cka/architecture/helm-kustomize]
+difficulty: 2
+estimated_minutes: 10
+backends: [kind, kubeadm]
+requires: [helm]
+namespaces: ["{{ns}}", "{{other_ns}}"]
+params:
+  ns: {choices: [mercury, venus-apps, saturn]}
+  other_ns: {choices: [audit, scanner, legacy-tools]}
+  app: {choices: [issue-report, ticket-api, status-page]}
+
+setup:
+  - script: |
+      set -eu
+      charts="{{workdir}}/charts"
+      mkdir -p "$charts"
+      helm package "{{lab.dir}}/charts/web" --version 1.0.0 --app-version 1.30 --destination "$charts" >/dev/null
+      helm package "{{lab.dir}}/charts/web" --version 1.1.0 --app-version 1.31 --destination "$charts" >/dev/null
+      helm install {{app}}-v1 "$charts/web-1.0.0.tgz" --namespace {{ns}} >/dev/null
+      helm install {{app}}-v2 "$charts/web-1.0.0.tgz" --namespace {{ns}} >/dev/null
+      helm install vulnerabilities "$charts/web-1.0.0.tgz" --namespace {{other_ns}} >/dev/null
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}-v1"}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}-v2"}
+  - wait: {type: deployment_ready, namespace: "{{other_ns}}", name: vulnerabilities}
+
+checks:
+  - id: v1-uninstalled
+    description: "Release {{app}}-v1 and its Deployment are gone"
+    type: script
+    script: |
+      [ -z "$(kubectl -n {{ns}} get secrets -l owner=helm,name={{app}}-v1 -o name)" ] \
+        || { echo "release {{app}}-v1 still exists"; exit 1; }
+      ! kubectl -n {{ns}} get deployment {{app}}-v1 >/dev/null 2>&1 || { echo "deployment {{app}}-v1 still exists"; exit 1; }
+  - id: v2-upgraded-in-place
+    description: "Release {{app}}-v2 has a second revision (upgraded, not reinstalled)"
+    type: exists
+    resource: "secret/sh.helm.release.v1.{{app}}-v2.v2"
+    namespace: "{{ns}}"
+  - id: v2-chart
+    description: "{{app}}-v2 runs chart version 1.1.0"
+    type: jsonpath
+    resource: "deployment/{{app}}-v2"
+    namespace: "{{ns}}"
+    jsonpath: '{.metadata.labels.helm\.sh/chart}'
+    value: web-1.1.0
+  - id: v2-serves-new-version
+    description: "{{app}}-v2 Pods run nginx 1.31"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app.kubernetes.io/instance={{app}}-v2"
+    command: [sh, -c, "nginx -v 2>&1"]
+    output_matches: "nginx/1\\.31"
+    timeout: 60
+  - id: edge-release
+    description: "Release {{app}}-edge is deployed"
+    type: script
+    script: |
+      [ -n "$(kubectl -n {{ns}} get secrets -l owner=helm,name={{app}}-edge,status=deployed -o name)" ] \
+        || { echo "no deployed release {{app}}-edge in {{ns}}"; exit 1; }
+  - id: edge-chart
+    description: "{{app}}-edge uses chart version 1.1.0"
+    type: jsonpath
+    resource: "deployment/{{app}}-edge"
+    namespace: "{{ns}}"
+    jsonpath: '{.metadata.labels.helm\.sh/chart}'
+    value: web-1.1.0
+  - id: edge-replicas
+    description: "{{app}}-edge runs 2 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}-edge"
+    replicas: 2
+    timeout: 60
+  - id: vulnerabilities-uninstalled
+    description: "Release vulnerabilities is gone from every namespace"
+    type: script
+    script: |
+      [ -z "$(kubectl get secrets -A -l owner=helm,name=vulnerabilities -o name)" ] \
+        || { echo "release vulnerabilities still exists"; exit 1; }
+      [ -z "$(kubectl get deployments -A -l app.kubernetes.io/instance=vulnerabilities -o name)" ] \
+        || { echo "its Deployment still exists"; exit 1; }
+  - id: namespace-kept
+    role: guard
+    description: "Namespace {{other_ns}} still exists (uninstall the release, do not delete the namespace)"
+    type: exists
+    resource: "namespace/{{other_ns}}"
+
+hints:
+  - "`helm list -A` shows every release with its namespace, chart version and app version. The chart packages are in `{{workdir}}/charts`; `helm show chart` and `helm show values` describe them."
+  - "`helm uninstall <release> -n <ns>`, `helm upgrade <release> <chart.tgz> -n <ns>` and `helm install <release> <chart.tgz> -n <ns> --set <key>=<value>`. Which value sets the replica count? `helm show values {{workdir}}/charts/web-1.1.0.tgz`."
+  - "An upgrade keeps the release and adds revision 2 (`helm history {{app}}-v2 -n {{ns}}`); uninstalling and reinstalling starts again at revision 1. Helm stores each revision as a Secret `sh.helm.release.v1.<release>.v<revision>`."
+
+competencies:
+  - Finding Helm releases across namespaces
+  - Upgrading a release to an exact chart version
+  - Installing a chart with values instead of editing manifests
+  - Uninstalling releases cleanly
+
+docs:
+  - https://helm.sh/docs/intro/using_helm/
+  - https://helm.sh/docs/helm/helm_upgrade/
+  - https://kubernetes.io/docs/concepts/cluster-administration/manage-deployment/
+
+source:
+  url: https://kubernetes.io/docs/
+  path: helm-operations
+  commit: 1352a129850b95e0c42fe08f111a37d0c4bbd12d
+  license: MIT

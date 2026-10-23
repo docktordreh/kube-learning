@@ -234,6 +234,8 @@ class Lab(_Strict):
     isolation: Literal["namespace", "cluster"] = "namespace"
     namespaces: list[str] = []
     owned: list[str] = []
+    # Pinned tools (helm) and shared cluster components (traefik) the lab needs.
+    requires: list[str] = []
     params: dict[str, Param] = {}
     setup: list[Step] = []
     checks: list[Check] = Field(min_length=1)
