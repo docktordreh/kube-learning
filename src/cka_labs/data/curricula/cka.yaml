@@ -1,0 +1,56 @@
+# Official CKA curriculum. Source: https://github.com/cncf/curriculum (CKA_Curriculum_v1.37.pdf)
+# and https://training.linuxfoundation.org/certification/certified-kubernetes-administrator-cka/
+# Verified 2026-10-19. Update this file when the curriculum changes; objective ids
+# (cka/<domain>/<key>) are referenced by labs, so rename only together with the labs
+# (tests enforce consistency).
+exam: CKA
+kubernetes_version: "1.37"
+verified: "2026-10-19"
+domains:
+  - id: architecture
+    title: Cluster Architecture, Installation & Configuration
+    weight: 25
+    objectives:
+      rbac: Manage role based access control (RBAC)
+      infrastructure: Prepare underlying infrastructure for installing a Kubernetes cluster
+      kubeadm: Create and manage Kubernetes clusters using kubeadm
+      lifecycle: Manage the lifecycle of Kubernetes clusters
+      ha-control-plane: Implement and configure a highly-available control plane
+      helm-kustomize: Use Helm and Kustomize to install cluster components
+      extension-interfaces: Understand extension interfaces (CNI, CSI, CRI, etc.)
+      crds-operators: Understand CRDs, install and configure operators
+  - id: workloads
+    title: Workloads & Scheduling
+    weight: 15
+    objectives:
+      deployments: Understand application deployments and how to perform rolling update and rollbacks
+      config: Use ConfigMaps and Secrets to configure applications
+      autoscaling: Configure workload autoscaling
+      self-healing: Understand the primitives used to create robust, self-healing, application deployments
+      scheduling: Configure Pod admission and scheduling (limits, node affinity, etc.)
+  - id: networking
+    title: Services & Networking
+    weight: 20
+    objectives:
+      pod-connectivity: Understand connectivity between Pods
+      network-policies: Define and enforce Network Policies
+      services: Use ClusterIP, NodePort, LoadBalancer service types and endpoints
+      gateway-api: Use the Gateway API to manage Ingress traffic
+      ingress: Know how to use Ingress controllers and Ingress resources
+      coredns: Understand and use CoreDNS
+  - id: storage
+    title: Storage
+    weight: 10
+    objectives:
+      storage-classes: Implement storage classes and dynamic volume provisioning
+      volumes: Configure volume types, access modes and reclaim policies
+      pv-pvc: Manage persistent volumes and persistent volume claims
+  - id: troubleshooting
+    title: Troubleshooting
+    weight: 30
+    objectives:
+      nodes: Troubleshoot clusters and nodes
+      components: Troubleshoot cluster components
+      monitoring: Monitor cluster and application resource usage
+      logs: Manage and evaluate container output streams
+      services: Troubleshoot services and networking

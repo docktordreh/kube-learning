@@ -1,6 +1,7 @@
 """Lab discovery and loading.
 
-Layout: labs/<domain>/<lab-id>/{lab.yaml, task.md, solution.sh, explanation.md, manifests/...}
+Layout: labs/<cert>/<domain>/<lab-id>/{lab.yaml, task.md, solution.sh, explanation.md, manifests/...}
+where <cert>/<domain> is the lab's primary (first) objective.
 """
 
 from collections.abc import Mapping
@@ -90,12 +91,14 @@ def workdir(lab_id: str) -> Path:
 def discover(root: Path | None = None) -> dict[str, LabSource]:
     root = root or paths.labs_dir()
     sources: dict[str, LabSource] = {}
-    for lab_file in sorted(root.glob("*/*/lab.yaml")):
+    for lab_file in sorted(root.glob("*/*/*/lab.yaml")):
         directory = lab_file.parent
         source = LabSource(directory.name, directory)
         if source.id in sources:
             raise CkaError(f"duplicate lab id {source.id}")
         sources[source.id] = source
+    if not sources and any(root.glob("*/*/lab.yaml")):
+        raise CkaError(f"{root} uses the old labs/<domain>/<id> layout; move labs to labs/<cert>/<domain>/<id>")
     return sources
 
 

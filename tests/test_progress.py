@@ -51,6 +51,8 @@ def test_legacy_database_is_migrated_in_place(tmp_path: Path) -> None:
     assert progress.lab_stats()["networking-001"].clean_passes == 1
     row = progress.export()["attempts"][0]  # type: ignore[index]
     assert (row["hints_total"], row["estimated_minutes"]) == (None, None)
+    assert (row["objectives"], row["domain"]) == ('["cka/networking/services"]', "cka/networking")
+    assert "cka/networking/services" in progress.objective_stats()
     Progress(db)  # reopening is a no-op
     assert _version(db) == len(MIGRATIONS)
 

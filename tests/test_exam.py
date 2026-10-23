@@ -11,7 +11,17 @@ def test_exam_selection_is_reproducible_and_weighted() -> None:
     second = _select(labs, 17, 8)
     assert [lab.id for lab in first] == [lab.id for lab in second]
     counts = {domain: sum(lab.domain == domain for lab in first) for domain in {lab.domain for lab in first}}
-    assert counts == {"architecture": 2, "workloads": 1, "networking": 2, "storage": 1, "troubleshooting": 2}
+    assert counts == {
+        "cka/architecture": 2, "cka/workloads": 1, "cka/networking": 2, "cka/storage": 1, "cka/troubleshooting": 2,
+    }
+
+
+def test_exam_selection_counts_labs_toward_their_ckad_domain() -> None:
+    labs = [source.meta() for source in catalog.discover().values() if "kind" in source.meta().backends]
+    selected = _select(labs, 17, 8, "ckad")
+    assert all("ckad" in lab.certs for lab in selected)
+    counts = {d: sum(lab.domain_in("ckad") == d for lab in selected) for d in {lab.domain_in("ckad") for lab in selected}}
+    assert counts == {"design-build": 2, "deployment": 2, "observability": 1, "environment": 2, "networking": 1}
 
 
 def test_exam_points_increase_with_difficulty() -> None:

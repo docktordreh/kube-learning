@@ -1,0 +1,58 @@
+# Official CKS curriculum. Source: https://github.com/cncf/curriculum ("CKS_Curriculum v1.34.pdf",
+# CC-BY 4.0; the newest CKS document there on 2026-10-23). Objective ids (cks/<domain>/<key>)
+# are referenced by labs, so rename only together with the labs (tests enforce consistency).
+# Many objectives (AppArmor, seccomp, audit logs, CIS, binaries) need the kubeadm backend.
+exam: CKS
+kubernetes_version: "1.34"
+verified: "2026-10-23"
+domains:
+  - id: cluster-setup
+    title: Cluster Setup
+    weight: 15
+    objectives:
+      network-policies: Use Network security policies to restrict cluster level access
+      cis-benchmark: Use CIS benchmark to review the security configuration of Kubernetes components (etcd, kubelet, kubedns, kubeapi)
+      ingress-tls: Properly set up Ingress objects with TLS
+      node-metadata: Protect node metadata and endpoints
+      verify-binaries: Verify platform binaries before deploying
+  - id: cluster-hardening
+    title: Cluster Hardening
+    weight: 15
+    objectives:
+      rbac: Use Role Based Access Controls to minimize exposure
+      service-accounts: Exercise caution in using service accounts e.g. disable defaults, minimize permissions on newly created ones
+      api-access: Restrict access to Kubernetes API
+      upgrade: Upgrade Kubernetes to avoid vulnerabilities
+  - id: system-hardening
+    title: System Hardening
+    weight: 10
+    objectives:
+      host-footprint: Minimize host OS footprint (reduce attack surface)
+      least-privilege-iam: Using least-privilege identity and access management
+      external-access: Minimize external access to the network
+      kernel-hardening: Appropriately use kernel hardening tools such as AppArmor, seccomp
+  - id: microservice-vulnerabilities
+    title: Minimize Microservice Vulnerabilities
+    weight: 20
+    objectives:
+      pod-security-standards: Use appropriate pod security standards
+      secrets: Manage Kubernetes secrets
+      isolation: Understand and implement isolation techniques (multi-tenancy, sandboxed containers, etc.)
+      pod-encryption: Implement Pod-to-Pod encryption (Cilium, Istio)
+  - id: supply-chain
+    title: Supply Chain Security
+    weight: 20
+    objectives:
+      base-image: Minimize base image footprint
+      understand-supply-chain: Understand your supply chain (e.g. SBOM, CI/CD, artifact repositories)
+      secure-supply-chain: Secure your supply chain (permitted registries, sign and validate artifacts, etc.)
+      static-analysis: Perform static analysis of user workloads and container images (e.g. Kubesec, KubeLinter)
+  - id: runtime-security
+    title: Monitoring, Logging and Runtime Security
+    weight: 20
+    objectives:
+      behavioral-analytics: Perform behavioral analytics to detect malicious activities
+      threat-detection: Detect threats within physical infrastructure, apps, networks, data, users and workloads
+      attack-investigation: Investigate and identify phases of attack and bad actors within the environment
+      immutability: Ensure immutability of containers at runtime
+      audit-logs: Use Kubernetes audit logs to monitor access

@@ -30,8 +30,8 @@ def test_progress_json_empty() -> None:
 def _failed_attempt() -> None:
     progress = Progress()
     attempt = progress.start_attempt(
-        lab_id="networking-001", mode="practice", backend="kind", seed=1, domain="networking",
-        objectives=["networking/services"], difficulty=1, hints_total=3, estimated_minutes=5,
+        lab_id="networking-001", mode="practice", backend="kind", seed=1, domain="cka/networking",
+        objectives=["cka/networking/services"], difficulty=1, hints_total=3, estimated_minutes=5,
     )
     progress.record_check(attempt, ["traffic"])
     progress.finish_attempt(attempt, "failed")
@@ -41,7 +41,7 @@ def test_progress_shows_readiness_and_check_descriptions() -> None:
     _failed_attempt()
     result = runner.invoke(app, ["progress"], env={"COLUMNS": "250"})
     assert result.exit_code == 0, result.output
-    assert "Exam readiness: 0%" in result.output
+    assert "CKA exam readiness: 0%" in result.output
     assert "HTTP via the Service DNS name reaches nginx" in result.output
 
 
@@ -65,6 +65,25 @@ def test_lab_commands_without_session_fail_cleanly() -> None:
         result = runner.invoke(app, command)
         assert result.exit_code != 0
         assert "no active lab" in str(result.exception)
+
+
+def test_lab_list_filters_by_certification() -> None:
+    result = runner.invoke(app, ["lab", "list", "--cert", "ckad"], env={"COLUMNS": "250"})
+    assert result.exit_code == 0, result.output
+    assert "networking-001" in result.output
+    assert "troubleshooting-007" not in result.output  # CKA-only node lab
+
+
+def test_progress_per_certification() -> None:
+    result = runner.invoke(app, ["progress", "--cert", "ckad"], env={"COLUMNS": "250"})
+    assert result.exit_code == 0, result.output
+    assert "Application Design and Build (20%)" in result.output
+
+
+def test_unknown_certification_fails() -> None:
+    result = runner.invoke(app, ["practice", "--cert", "nope", "--dry-run"])
+    assert result.exit_code != 0
+    assert "unknown certification" in str(result.exception)
 
 
 def test_practice_dry_run_recommends_fundamentals() -> None:

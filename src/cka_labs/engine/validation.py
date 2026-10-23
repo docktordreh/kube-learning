@@ -3,7 +3,7 @@
 import itertools
 import re
 
-from cka_labs.config import curriculum, toolchain
+from cka_labs.config import objective_ids, toolchain
 from cka_labs.engine import catalog
 from cka_labs.engine.catalog import LabSource
 from cka_labs.errors import CkaError
@@ -43,9 +43,10 @@ def validate_lab(source: LabSource) -> list[str]:
     except CkaError as exc:
         return [f"{prefix}: {exc}"]
 
-    if source.directory.parent.name != lab.domain:
-        problems.append(f"{prefix}: lives in labs/{source.directory.parent.name} but domain is {lab.domain}")
-    known = curriculum().objective_ids()
+    home = f"{source.directory.parent.parent.name}/{source.directory.parent.name}"
+    if home != lab.domain:
+        problems.append(f"{prefix}: lives in labs/{home} but its primary objective is in {lab.domain}")
+    known = objective_ids()
     problems += [f"{prefix}: unknown objective {o}" for o in lab.objectives if o not in known]
     if len(lab.hints) < MIN_HINTS:
         problems.append(f"{prefix}: needs at least {MIN_HINTS} progressive hints")

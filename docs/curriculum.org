@@ -1,17 +1,27 @@
-#+title: CKA curriculum source of truth
+#+title: Curriculum source of truth
 
-* Verified 2026-10-19
+* Certifications
 
-The current official CKA page and CNCF curriculum identify Kubernetes =v1.37=.
-The domain weights are:
+Each certification has one file in =src/cka_labs/data/curricula/=. The file
+name is the certification id used by =--cert=, =CKA_CERT= and objective ids.
 
-| domain                                      | weight |
-|---------------------------------------------+--------|
-| Cluster Architecture, Installation & Configuration | 25% |
-| Workloads & Scheduling                      | 15%   |
-| Services & Networking                       | 20%   |
-| Storage                                     | 10%   |
-| Troubleshooting                             | 30%   |
+| id     | exam | curriculum version | verified   | exam type    | labs                    |
+|--------+------+--------------------+------------+--------------+-------------------------|
+| =cka=  | CKA  | v1.37              | 2026-10-19 | hands-on     | every domain covered    |
+| =ckad= | CKAD | v1.37              | 2026-10-23 | hands-on     | every domain covered    |
+| =cks=  | CKS  | v1.34              | 2026-10-23 | hands-on     | RBAC and NetworkPolicy  |
+
+Lab metadata references stable objective ids such as
+=cka/networking/services= or =ckad/environment/configmaps=. It does not
+duplicate curriculum text. Tests check that every objective a lab names exists,
+that the weights of each certification sum to 100, and that every CKA and CKAD
+domain has at least one lab.
+
+Exam quotas follow the weights. Eight tasks split by largest remainder give
+CKA 2/1/2/1/2 and CKAD 2/2/1/2/1 (design-build, deployment, observability,
+environment, networking).
+
+* CKA
 
 Primary sources:
 
@@ -19,12 +29,58 @@ Primary sources:
 - https://www.cncf.io/training/certification/cka/
 - https://training.linuxfoundation.org/certification/certified-kubernetes-administrator-cka/
 
-The parsed objectives and verification date live in
-=src/cka_labs/data/curriculum.yaml=. Lab metadata references stable objective
-ids such as =networking/services=; it does not duplicate curriculum text.
+| domain                                             | weight |
+|----------------------------------------------------+--------|
+| Cluster Architecture, Installation & Configuration |    25% |
+| Workloads & Scheduling                             |    15% |
+| Services & Networking                              |    20% |
+| Storage                                            |    10% |
+| Troubleshooting                                    |    30% |
 
 The v1.37 competencies include RBAC, kubeadm, lifecycle, Helm/Kustomize,
 extension interfaces, CRDs/operators; Deployments, configuration, autoscaling,
 self-healing and scheduling; Pod connectivity, NetworkPolicy, Services,
 Gateway/Ingress and CoreDNS; StorageClasses, volume types, reclaim policy and
 PV/PVC; and cluster/node/component/resource/log/service troubleshooting.
+
+* CKAD
+
+Primary source: https://github.com/cncf/curriculum/blob/master/CKAD_Curriculum_v1.37.pdf
+
+| domain                                              | weight |
+|-----------------------------------------------------+--------|
+| Application Design and Build                        |    20% |
+| Application Deployment                              |    20% |
+| Application Observability and Maintenance           |    15% |
+| Application Environment, Configuration and Security |    25% |
+| Services and Networking                             |    20% |
+
+The existing labs cover CKAD through shared objectives. Gaps without a lab:
+container images, workload resource choice (DaemonSet, CronJob), deployment
+strategies, Helm, API deprecations, SecurityContexts and Ingress.
+
+* CKS
+
+Primary source: =CKS_Curriculum v1.34.pdf= in https://github.com/cncf/curriculum,
+the newest CKS document there on 2026-10-23.
+
+| domain                                   | weight |
+|------------------------------------------+--------|
+| Cluster Setup                            |    15% |
+| Cluster Hardening                        |    15% |
+| System Hardening                         |    10% |
+| Minimize Microservice Vulnerabilities    |    20% |
+| Supply Chain Security                    |    20% |
+| Monitoring, Logging and Runtime Security |    20% |
+
+A CKS mock exam needs labs in every domain first. Many objectives (AppArmor,
+seccomp, audit logs, CIS benchmark, binary verification) need node access and
+belong on the kubeadm backend.
+
+* Certifications not modelled
+
+KCNA, KCSA and the project associates (PCA, CCA, ICA, KCA, CGOA, CAPA, CBA,
+OTCA, CNPA) are multiple-choice exams. Labs can reinforce them, but a mock
+exam would need a quiz engine, which this project does not have. Their
+curricula are in the same CNCF repository under CC-BY 4.0. CNPE and CKNE were
+not reviewed.

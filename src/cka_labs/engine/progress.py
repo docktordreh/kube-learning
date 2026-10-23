@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     mode TEXT NOT NULL,              -- practice | exam
     backend TEXT NOT NULL,
     seed INTEGER NOT NULL,
-    domain TEXT NOT NULL,
+    domain TEXT NOT NULL,            -- <cert>/<domain> of the primary objective
     objectives TEXT NOT NULL,        -- JSON list
     difficulty INTEGER NOT NULL,
     started_at REAL NOT NULL,
@@ -72,6 +72,12 @@ MIGRATIONS: list[tuple[str, ...]] = [
     ),
     # 2: whether a check failed on the attempt's first check run (NULL for older rows)
     ("ALTER TABLE check_failures ADD COLUMN failed_first INTEGER",),
+    # 3: objectives and domains are qualified by certification; everything before was CKA
+    (
+        "UPDATE attempts SET objectives = (SELECT json_group_array('cka/' || value)"
+        " FROM (SELECT value FROM json_each(attempts.objectives) ORDER BY key)) WHERE json_valid(objectives)",
+        "UPDATE attempts SET domain = 'cka/' || domain",
+    ),
 ]
 
 

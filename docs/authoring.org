@@ -2,7 +2,7 @@
 
 * Directory contract
 
-Create =labs/<domain>/<domain>-NNN/= with:
+Create =labs/<cert>/<domain>/<name>-NNN/= with:
 
 | file             | audience / purpose                        |
 |------------------+-------------------------------------------|
@@ -11,6 +11,12 @@ Create =labs/<domain>/<domain>-NNN/= with:
 | =solution.sh=    | hidden reference solution                 |
 | =explanation.md= | hidden debrief and production recognition |
 | =manifests/=     | declarative fixture inputs                |
+
+=objectives= lists ids of the form =<cert>/<domain>/<key>= from
+=src/cka_labs/data/curricula/<cert>.yaml=. The first objective is the primary
+one: it decides the lab's directory, and the lab counts toward that domain in
+exams. List an objective of another certification only when the lab really
+practises it. A lab counts toward each certification it has an objective in.
 
 The schema is strict Pydantic. Template strings use ={{name}}= and are chosen
 from =params= with a persisted seed. Unknown names are errors. =captured.*=

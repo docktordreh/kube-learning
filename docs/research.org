@@ -23,6 +23,62 @@
   future both-Ingress-and-Gateway controller; the MVP does not make a Gateway
   controller a hidden dependency.
 
+* Public course content, checked 2026-10-23
+
+Question: can courses from online providers be authored so that they run
+locally with this project's features (seeded params, goal/guard checks, hints,
+progress, reset, scoped cleanup, mock exams)?
+
+| source                                        | format                             | terms                                                 | use?                        |
+|-----------------------------------------------+------------------------------------+-------------------------------------------------------+--------------------------------|
+| course platform                                     | closed platform, no public lab API | ToS §2.10, §2.15(ii): no copying, no derivative works | no                             |
+| training-source (KLLR GmbH)                         | closed paid simulators             | AGB §9: no copying, editing or republishing           | no                             |
+| =scenario-source/scenarios-*=, =scenario-examples= | public scenario scenario repos          | no LICENSE file (all rights reserved)                 | no                             |
+| =public-repo/cka-scenario-source= (~55 CKA)     | public scenario                         | no LICENSE file                                       | no                             |
+| =public-repo/ckad-scenario-source= (~70 CKAD)   | public scenario                         | MIT                                                   | yes, with attribution          |
+| =public-repo/exam-source= (CKA/CKAD/CKS)               | setup/validation shell scripts     | BSL 1.1: personal and educational use only            | local only, not committed      |
+| =cncf/curriculum=                             | curriculum PDFs                    | CC-BY 4.0                                             | yes (used in =data/curricula=) |
+
+Sources: https://course-source.com/terms-of-service, https://scenario-source.com/agb.html,
+https://scenario-source.com/creators, the repositories' GitHub pages and LICENSE
+files. Asking an author for permission is the only route for unlicensed repos.
+
+** public scenario scenario format
+
+A scenario directory holds =index.json= (title, steps, =intro.courseData=
+background setup script, =backend.imageid=), Markdown step texts, a setup
+script and a =verify.sh= per step that passes with exit code 0. Creators publish
+by pushing to a GitHub repository linked to their profile. Environments are
+kubeadm clusters named =controlplane= and =node01= at fixed IPs
+=172.30.1.2= and =172.30.2.2=; scripts run as root on the control plane.
+
+** Gaps when converting a scenario 1:1
+
+- Node names, fixed IPs and =ssh node01= do not exist on kind; the kubeadm
+  backend names its workers =worker-1= and =worker-2=.
+- Names are hard-coded, so there are no params and every attempt is the same.
+- One exit code per step: no goal/guard split, so the per-check failure
+  statistics degrade to one check.
+- Many =verify.sh= scripts compare YAML structure with =jq= instead of
+  behaviour. That contradicts the rule that every valid solution gets full
+  credit.
+- The solution sits in a =<details>= block of the step text; there are no
+  separate hints, explanation, objectives or difficulty.
+- No owned resources or cleanup, so reset and scoped cleanup cannot cover them.
+
+** Decision
+
+No live integration with any provider. A later =cka dev scenario-source=
+command may turn a permissively licensed scenario into a draft lab:
+=setup.sh= as a =script= step, =verify.sh= as one =script= goal check,
+=task.md= from the step text without the solution, =solution.sh= from the
+solution block, and the source repository, commit and license recorded. The
+draft enters the catalog only after an author adds objectives, hints and
+behavioural checks and =cka dev verify= passes.
+
+Labs were separated by certification first (=data/curricula/=,
+=labs/<cert>/<domain>/=, =--cert=), so authored CKAD content has a place to go.
+
 * Adopted conventions
 
 exam-source/public scenario's shell setup/validation split is reused, but with typed

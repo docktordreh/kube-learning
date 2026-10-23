@@ -212,10 +212,11 @@ class Param(_Strict):
 
 
 class Lab(_Strict):
-    id: Annotated[str, Field(pattern=r"^[a-z]+-[0-9]{3}$")]
+    id: Annotated[str, Field(pattern=r"^[a-z]+(-[a-z]+)*-[0-9]{3}$")]
     title: str
-    domain: Literal["architecture", "workloads", "networking", "storage", "troubleshooting"]
-    objectives: list[str] = Field(min_length=1)
+    # <cert>/<domain>/<key>, e.g. cka/networking/services. The first objective is primary:
+    # it decides the lab's directory labs/<cert>/<domain>/ and its home domain.
+    objectives: list[Annotated[str, Field(pattern=r"^[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+$")]] = Field(min_length=1)
     difficulty: Difficulty
     estimated_minutes: int = Field(ge=1, le=60)
     backends: list[Backend] = Field(min_length=1)
@@ -251,3 +252,21 @@ class Lab(_Strict):
     @property
     def goal_checks(self) -> list[Check]:
         return [c for c in self.checks if c.role == "goal"]
+
+    @property
+    def cert(self) -> str:
+        """Certification of the primary objective."""
+        return self.objectives[0].split("/")[0]
+
+    @property
+    def domain(self) -> str:
+        """Primary domain, qualified by its certification (e.g. cka/networking)."""
+        return self.objectives[0].rpartition("/")[0]
+
+    @property
+    def certs(self) -> list[str]:
+        return list(dict.fromkeys(o.split("/")[0] for o in self.objectives))
+
+    def domain_in(self, cert: str) -> str | None:
+        """The lab's domain id within `cert` (first matching objective), or None if it has none."""
+        return next((o.split("/")[1] for o in self.objectives if o.startswith(f"{cert}/")), None)

@@ -1,0 +1,68 @@
+id: workloads-005
+title: Deployment blocked by namespace quota and limits
+objectives: [cka/workloads/scheduling, cka/troubleshooting/monitoring, ckad/environment/requests-limits-quotas]
+difficulty: 3
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [team-alpha, team-bravo, team-delta]}
+  app: {choices: [reports, exporter, notifier]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait:
+      type: jsonpath
+      resource: "replicasets -l app={{app}}"
+      namespace: "{{ns}}"
+      jsonpath: "{.items[0].status.conditions[?(@.type=='ReplicaFailure')].status}"
+      value: "True"
+    timeout: 60
+  - capture: quota
+    resource: resourcequota/compute
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.hard}"
+  - capture: limits
+    resource: limitrange/container-limits
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.limits}"
+
+checks:
+  - id: available
+    description: "Deployment {{app}} runs 3/3 replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 3
+    timeout: 60
+  - id: quota-untouched
+    role: guard
+    description: "ResourceQuota compute unchanged"
+    type: jsonpath
+    resource: resourcequota/compute
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.hard}"
+    value: "{{captured.quota}}"
+  - id: limitrange-untouched
+    role: guard
+    description: "LimitRange container-limits unchanged"
+    type: jsonpath
+    resource: limitrange/container-limits
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.limits}"
+    value: "{{captured.limits}}"
+
+hints:
+  - "The Deployment has no Pods at all, so look one level down: `kubectl -n {{ns}} events` or describe the ReplicaSet by name (`kubectl -n {{ns}} get rs`)."
+  - "`kubectl -n {{ns}} describe resourcequota,limitrange`. A quota on requests/limits forces every Pod to declare them, and the LimitRange caps a whole Pod."
+  - "Give the container requests *and* limits that fit both: per Pod ≤ the LimitRange max, and 3 Pods × values ≤ the quota (e.g. requests 100m/64Mi, limits 200m/128Mi). `kubectl set resources` does it in one command."
+
+competencies:
+  - Reading ReplicaSet events for admission failures
+  - ResourceQuota and LimitRange interaction
+  - Setting container requests and limits
+
+docs:
+  - https://kubernetes.io/docs/concepts/policy/resource-quotas/
+  - https://kubernetes.io/docs/concepts/policy/limit-range/
+  - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/

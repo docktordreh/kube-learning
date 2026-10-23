@@ -24,13 +24,22 @@ class Choice:
 
 
 def filter_labs(
-    labs: Iterable[Lab], *, backend: str, domain: str | None = None, difficulty: int | None = None
+    labs: Iterable[Lab],
+    *,
+    backend: str,
+    cert: str | None = None,
+    domain: str | None = None,
+    difficulty: int | None = None,
 ) -> list[Lab]:
+    """`cert` keeps labs with an objective in that certification; `domain` is a domain id of `cert`."""
+    if domain is not None and cert is None:
+        raise CkaError("a domain filter needs a certification")
     return [
         lab
         for lab in labs
         if backend in lab.backends
-        and (domain is None or lab.domain == domain)
+        and (cert is None or cert in lab.certs)
+        and (domain is None or lab.domain_in(cert or "") == domain)
         and (difficulty is None or lab.difficulty == difficulty)
     ]
 
@@ -44,38 +53,52 @@ def _tiebreak(lab: Lab, lab_stats: dict[str, LabStats]) -> tuple[int, float, int
     return (s.attempts if s else 0, (s.last_attempt or 0.0) if s else 0.0, lab.difficulty, lab.id)
 
 
-def _levels(labs: list[Lab], lab_stats: dict[str, LabStats]) -> dict[str, int]:
+def _objectives(lab: Lab, cert: str | None) -> list[str]:
+    return [o for o in lab.objectives if cert is None or o.startswith(f"{cert}/")]
+
+
+def _home(lab: Lab, cert: str | None) -> str:
+    """The domain a lab's level counts toward: its domain within `cert`, else its primary one."""
+    return f"{cert}/{lab.domain_in(cert)}" if cert else lab.domain
+
+
+def _levels(labs: list[Lab], lab_stats: dict[str, LabStats], cert: str | None) -> dict[str, int]:
     level: dict[str, int] = {}
     for lab in labs:
         s = lab_stats.get(lab.id)
         if s and s.clean_passes:
-            level[lab.domain] = max(level.get(lab.domain, 0), lab.difficulty)
+            level[_home(lab, cert)] = max(level.get(_home(lab, cert), 0), lab.difficulty)
     return level
 
 
-def recommend(labs: list[Lab], stats: dict[str, ObjectiveStats], lab_stats: dict[str, LabStats]) -> Choice:
+def recommend(
+    labs: list[Lab], stats: dict[str, ObjectiveStats], lab_stats: dict[str, LabStats], *, cert: str | None = None
+) -> Choice:
+    """`cert` restricts the weighed objectives to one certification (labs must cover it)."""
     if not labs:
         raise CkaError("no lab matches the requested filters on this backend")
-    levels = _levels(labs, lab_stats)
-    reachable = [lab for lab in labs if lab.difficulty <= levels.get(lab.domain, 0) + 1] or labs
+    levels = _levels(labs, lab_stats, cert)
+    reachable = [lab for lab in labs if lab.difficulty <= levels.get(_home(lab, cert), 0) + 1] or labs
 
     def key(lab: Lab) -> tuple[float, tuple[int, float, int, str]]:
-        return (-max(_weakness(o, stats) for o in lab.objectives), _tiebreak(lab, lab_stats))
+        return (-max(_weakness(o, stats) for o in _objectives(lab, cert)), _tiebreak(lab, lab_stats))
 
     lab = min(reachable, key=key)
-    objective = max(lab.objectives, key=lambda o: _weakness(o, stats))
+    objective = max(_objectives(lab, cert), key=lambda o: _weakness(o, stats))
     return Choice(
         lab,
         f"objective {objective} has weakness {_weakness(objective, stats):.2f}; "
-        f"difficulty {lab.difficulty} is within your current level +1 in {lab.domain}",
+        f"difficulty {lab.difficulty} is within your current level +1 in {_home(lab, cert)}",
     )
 
 
-def weakest(labs: list[Lab], stats: dict[str, ObjectiveStats], lab_stats: dict[str, LabStats]) -> Choice:
-    covered = {o for lab in labs for o in lab.objectives}
+def weakest(
+    labs: list[Lab], stats: dict[str, ObjectiveStats], lab_stats: dict[str, LabStats], *, cert: str | None = None
+) -> Choice:
+    covered = {o for lab in labs for o in _objectives(lab, cert)}
     attempted = [s for s in stats.values() if s.objective in covered]
     if not attempted:
-        return recommend(labs, stats, lab_stats)
+        return recommend(labs, stats, lab_stats, cert=cert)
     target = max(attempted, key=lambda s: (s.weakness, -s.credit, s.objective))
     lab = min((lab for lab in labs if target.objective in lab.objectives), key=lambda lab: _tiebreak(lab, lab_stats))
     return Choice(
