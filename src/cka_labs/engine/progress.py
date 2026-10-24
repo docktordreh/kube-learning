@@ -19,7 +19,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 
 from cka_labs import paths
 from cka_labs.errors import CkaError
@@ -327,7 +326,7 @@ class Progress:
             ).fetchall()
         return [FailedCheck(r["lab_id"], r["check_id"], r["first_try"], r["attempts"], r["runs"]) for r in rows]
 
-    def lab_history(self, lab_id: str) -> list[dict[str, Any]]:
+    def lab_history(self, lab_id: str) -> list[dict[str, object]]:
         """Every attempt of one lab (including active and cancelled), oldest first."""
         with self._connect() as conn:
             attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts WHERE lab_id = ? ORDER BY id", (lab_id,))]

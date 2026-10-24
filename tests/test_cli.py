@@ -86,6 +86,12 @@ def test_unknown_certification_fails() -> None:
     assert "unknown certification" in str(result.exception)
 
 
+def test_explicit_lab_must_match_certification() -> None:
+    result = runner.invoke(app, ["lab", "start", "troubleshooting-007", "--cert", "ckad"])
+    assert result.exit_code != 0
+    assert "does not count toward" in str(result.exception)
+
+
 def test_practice_dry_run_recommends_fundamentals() -> None:
     result = runner.invoke(app, ["practice", "--dry-run"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output

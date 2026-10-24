@@ -2,7 +2,6 @@
 
 from functools import cache
 from pathlib import Path
-from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -87,7 +86,7 @@ class Component(_Frozen):
     release: str = ""
     namespace: str = ""
     images: list[str] = []
-    values: dict[str, Any] = {}
+    values: dict[str, object] = {}
     requires: list[str] = []  # components installed first
 
     @model_validator(mode="after")

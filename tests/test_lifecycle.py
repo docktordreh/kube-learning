@@ -14,7 +14,7 @@ def _service(monkeypatch: pytest.MonkeyPatch) -> LabService:
     )
     runner = SimpleNamespace(captured={"node_ip": "1.2.3.4"}, cleanup=lambda: None)
     prepared = SimpleNamespace(lab=lab, runner=runner)
-    monkeypatch.setattr(lifecycle, "provision", lambda prepared, log: None)
+    monkeypatch.setattr(lifecycle, "provision", lambda prepared, log, **kwargs: None)
     monkeypatch.setattr(LabService, "_prepared", lambda self, session: prepared)
     return LabService(progress=Progress(), log=lambda _: None)
 
@@ -64,3 +64,50 @@ def test_reset_before_pass_keeps_attempt(monkeypatch: pytest.MonkeyPatch) -> Non
     session = service.reset()
 
     assert (session.attempt_id, session.hints_used, session.started_at) == (first.attempt_id, 1, first.started_at)
+
+
+def test_cluster_isolation_uses_an_extra_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class Cluster:
+        backend_name = "kind"
+
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def ensure(self) -> None:
+            calls.append(self.name)
+
+    class Backend:
+        max_extra_clusters = 1
+        main_is_dedicated = False
+
+        def __init__(self) -> None:
+            self.main_cluster = Cluster("main")
+            self.extra_cluster = Cluster("extra")
+
+        def problems(self) -> list[str]:
+            return []
+
+        def main(self) -> Cluster:
+            return self.main_cluster
+
+        def extra(self, index: int) -> Cluster:
+            assert index == 1
+            return self.extra_cluster
+
+    lab = SimpleNamespace(
+        id="troubleshooting-007", domain="cka/troubleshooting", objectives=["cka/troubleshooting/kubelet"],
+        difficulty=2, hints=["a"], estimated_minutes=5,
+    )
+    source = SimpleNamespace(meta=lambda: SimpleNamespace(backends=["kind"], isolation="cluster"))
+    prepared = SimpleNamespace(lab=lab, values={}, runner=SimpleNamespace(captured={}))
+    backend = Backend()
+    monkeypatch.setattr(lifecycle, "get_backend", lambda name: backend)
+    monkeypatch.setattr(lifecycle.catalog, "get", lambda lab_id: source)
+    monkeypatch.setattr(lifecycle, "prepare", lambda *args, **kwargs: prepared)
+    monkeypatch.setattr(lifecycle, "provision", lambda *args, **kwargs: None)
+
+    LabService(progress=Progress(), log=lambda _: None).start("troubleshooting-007", "kind", seed=1)
+
+    assert calls == ["extra"]

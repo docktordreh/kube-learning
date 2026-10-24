@@ -20,7 +20,7 @@ from cka_labs.config import DEFAULT_CERT, curriculum
 from cka_labs.engine import catalog
 from cka_labs.engine.evaluator import CheckResult, evaluate_all
 from cka_labs.engine.generator import new_seed
-from cka_labs.engine.lifecycle import exam_active, load_session, prepare, provision
+from cka_labs.engine.lifecycle import Prepared, exam_active, load_session, prepare, provision
 from cka_labs.engine.progress import Progress
 from cka_labs.engine.runner import Runner
 from cka_labs.errors import CkaError
@@ -135,6 +135,23 @@ def _select(labs: list[Lab], seed: int, count: int, cert: str = DEFAULT_CERT) ->
     return selected
 
 
+def _areas(lab: Lab) -> set[str]:
+    areas = {f"exclusive:{area}" for area in lab.exclusive}
+    areas.update(f"namespace:{namespace}" for namespace in lab.namespaces)
+    areas.update(f"owned:{item}" for item in lab.owned)
+    return areas
+
+
+def _check_areas(labs: list[Lab]) -> None:
+    seen: dict[str, str] = {}
+    for lab in labs:
+        for area in _areas(lab):
+            previous = seen.get(area)
+            if previous is not None:
+                raise CkaError(f"exam labs {previous} and {lab.id} overlap in {area}")
+            seen[area] = lab.id
+
+
 class ExamService:
     def __init__(self, progress: Progress | None = None, log: Callable[[str], None] = print) -> None:
         self.progress = progress or Progress()
@@ -172,24 +189,26 @@ class ExamService:
             if backend_name in source.meta().backends and source.meta().isolation == "namespace"
         ]
         selected = _select(candidates, exam_seed, 8, cert)
+        tasks: list[ExamTask] = []
+        used: list[tuple[Cluster, Runner]] = []
+        attempt_ids: list[int] = []
+        cluster = backend.main()
+        cluster.ensure()
+        planned: list[tuple[int, Lab, int, Prepared]] = []
+        for number, lab in enumerate(selected, 1):
+            self.log(f"preparing task {number}/8: {getattr(lab, 'id')} on {cluster.name}")
+            source = catalog.get(getattr(lab, "id"))
+            task_seed = _stable_number(exam_seed, getattr(lab, "id")) % (2**31 - 1) or 1
+            prepared = prepare(source, cluster, task_seed, self.log)
+            planned.append((number, lab, task_seed, prepared))
+        _check_areas([prepared.lab for _, _, _, prepared in planned])
         exam_id = self.progress.start_exam(
             backend=backend_name, seed=exam_seed, duration_minutes=duration_minutes, pass_percent=pass_percent
         )
-        tasks: list[ExamTask] = []
-        used: list[tuple[Cluster, Runner]] = []
         try:
-            main: Cluster | None = None
-            for number, lab in enumerate(selected, 1):
-                if main is None:
-                    main = backend.main()
-                cluster = main
-                self.log(f"preparing task {number}/8: {getattr(lab, 'id')} on {cluster.name}")
-                cluster.ensure()
-                source = catalog.get(getattr(lab, "id"))
-                task_seed = _stable_number(exam_seed, getattr(lab, "id")) % (2**31 - 1) or 1
-                prepared = prepare(source, cluster, task_seed, self.log)
-                used.append((cluster, prepared.runner))
+            for number, lab, task_seed, prepared in planned:
                 provision(prepared, self.log)
+                used.append((cluster, prepared.runner))
                 attempt = self.progress.start_attempt(
                     lab_id=prepared.lab.id,
                     mode="exam",
@@ -202,6 +221,7 @@ class ExamService:
                     estimated_minutes=prepared.lab.estimated_minutes,
                     exam_id=exam_id,
                 )
+                attempt_ids.append(attempt)
                 tasks.append(
                     ExamTask(
                         number=number,
@@ -218,8 +238,16 @@ class ExamService:
                     )
                 )
         except Exception:
+            for attempt_id in attempt_ids:
+                self.progress.finish_attempt(attempt_id, "cancelled")
             for cluster, runner in reversed(used):
                 runner.cleanup()
+            self.progress.finish_exam(
+                exam_id,
+                0,
+                sum(task.points for task in tasks),
+                {"aborted": True, "reason": "setup failed", "exam_id": exam_id},
+            )
             clear_exam()
             raise
         state = ExamState(

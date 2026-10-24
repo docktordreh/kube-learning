@@ -90,16 +90,18 @@ def prepare(source: LabSource, cluster: Cluster, seed: int, log: Log, captured: 
     return Prepared(source, lab, runner, values)
 
 
-def provision(prepared: Prepared, log: Log) -> None:
+def provision(prepared: Prepared, log: Log, *, preflight: bool = True) -> None:
     """Clean leftovers, set up, inject the fault and verify the broken state."""
     runner = prepared.runner
+    if preflight:
+        runner.ensure_clean_start()
     log(f"cleaning any leftovers of {prepared.lab.id}")
     runner.cleanup()
     log("setting up scenario")
     try:
         runner.setup()
         runner.verify_initial_state()
-    except SetupError:
+    except (SetupError, CkaError):
         log("setup failed; cleaning up")
         runner.cleanup()
         raise
@@ -141,7 +143,15 @@ class LabService:
         meta = source.meta()
         if backend_name not in meta.backends:
             raise CkaError(f"{lab_id} needs one of the backends: {', '.join(meta.backends)} (use --backend)")
-        cluster = backend.main()
+        if meta.isolation == "cluster":
+            if backend.max_extra_clusters:
+                cluster = backend.extra(1)
+            elif backend.main_is_dedicated:
+                cluster = backend.main()
+            else:
+                raise CkaError(f"{lab_id} requires an isolated cluster unavailable on {backend_name}")
+        else:
+            cluster = backend.main()
         self.log(f"ensuring {backend_name} cluster {cluster.name} (first run takes a few minutes)")
         cluster.ensure()
         seed = seed if seed is not None else new_seed()
@@ -226,7 +236,7 @@ class LabService:
         session = self.require_session()
         prepared = self._prepared(session)
         prepared.runner.captured.clear()
-        provision(prepared, self.log)
+        provision(prepared, self.log, preflight=False)
         update: dict[str, object] = {"captured": prepared.runner.captured, "solved": False}
         if session.solved:
             update |= {

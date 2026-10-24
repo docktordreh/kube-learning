@@ -115,6 +115,11 @@ class KindCluster(Cluster):
         ):
             path.unlink(missing_ok=True)
 
+    def verify_ownership(self) -> None:
+        self._require_created_by_cka()
+        for node in self.nodes().values():
+            self._require_owned_container(node)
+
     def _require_created_by_cka(self) -> None:
         if not (self.state_dir / "created-by-cka").is_file():
             raise SafetyError(
@@ -148,18 +153,20 @@ class KindCluster(Cluster):
             _, machine = tools.platform_pair()
             with tempfile.TemporaryDirectory(prefix="cka-images-") as directory:
                 archive = os.path.join(directory, "images.tar")
-                proc.run(
+                saved = proc.run(
                     [
-                        "docker",
-                        "image",
-                        "save",
-                        f"--platform=linux/{machine}",
-                        f"--output={archive}",
-                        *images,
+                        "docker", "image", "save", f"--platform=linux/{machine}",
+                        f"--output={archive}", *images,
                     ],
                     timeout=900,
-                    check=True,
                 )
+                if not saved.ok:
+                    # Older Docker releases do not understand --platform for image save.
+                    proc.run(
+                        ["docker", "image", "save", f"--output={archive}", *images],
+                        timeout=900,
+                        check=True,
+                    )
                 proc.run(
                     ["kind", "load", "image-archive", archive, f"--name={self.name}"],
                     timeout=900,

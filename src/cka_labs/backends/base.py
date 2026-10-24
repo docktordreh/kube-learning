@@ -111,6 +111,11 @@ class Cluster(ABC):
     def grader(self) -> Kube:
         return Kube(self.grader_kubeconfig, self.cluster_id)
 
+    def verify_ownership(self) -> None:
+        """Verify local ownership when the API server cannot be queried."""
+        if not (self.state_dir / "created-by-cka").is_file():
+            raise SafetyError(f"cluster {self.name!r} has no cka ownership marker; refusing node mutation")
+
     # --- lifecycle ------------------------------------------------------------------------
 
     @abstractmethod
@@ -233,6 +238,11 @@ class Backend(ABC):
     @property
     def max_extra_clusters(self) -> int:
         return 0
+
+    @property
+    def main_is_dedicated(self) -> bool:
+        """Whether the backend's main cluster is isolated for one lab."""
+        return False
 
     @abstractmethod
     def problems(self) -> list[str]:

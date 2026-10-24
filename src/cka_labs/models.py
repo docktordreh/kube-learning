@@ -223,6 +223,8 @@ class Lab(_Strict):
     # namespace: shares a cluster with other labs; cluster: may disrupt cluster-wide
     # behaviour (nodes, control plane, DNS) and gets its own cluster in exams.
     isolation: Literal["namespace", "cluster"] = "namespace"
+    # Named shared-cluster areas; namespaces and owned resources are also exclusive.
+    exclusive: list[str] = []
     namespaces: list[str] = []
     owned: list[str] = []
     # Pinned tools (helm) and shared cluster components (traefik) the lab needs.
@@ -249,6 +251,8 @@ class Lab(_Strict):
             kind, sep, name = item.partition("/")
             if not sep or not kind or not name or "*" in item:
                 raise ValueError(f"owned entries must be explicit kind/name, got {item!r}")
+        if len(self.exclusive) != len(set(self.exclusive)):
+            raise ValueError("exclusive areas must be unique")
         return self
 
     @property

@@ -254,10 +254,11 @@ def lab_start(
     seed: Annotated[int | None, typer.Option(help="Scenario seed (same seed = same scenario)")] = None,
 ) -> None:
     """Provision a lab, inject its fault, verify the broken state and show the task."""
+    requested_cert = cert_name(cert) if cert is not None or os.environ.get("CKA_CERT") else None
     name = backend or os.environ.get("CKA_BACKEND", "kind")
     if lab_id is None:
         progress = Progress()
-        target = cert_name(cert)
+        target = requested_cert or cert_name(None)
         choice = selection.recommend(
             selection.filter_labs(all_labs(), backend=name, cert=target),
             progress.objective_stats(),
@@ -266,6 +267,8 @@ def lab_start(
         )
         log(f"recommended {choice.lab.id}: {choice.reason}")
         lab_id = choice.lab.id
+    elif requested_cert and requested_cert not in catalog.get(lab_id).meta().certs:
+        raise CkaError(f"{lab_id} does not count toward the {requested_cert} certification")
     _start(lab_id, name, seed)
 
 

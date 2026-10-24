@@ -16,7 +16,7 @@
 
 * Original challenge research
 
-[[file:research-cka-ckad.md][research-cka-ckad.md]] records public CKA and CKAD
+[[file:research-cka-ckad.org][research-cka-ckad.org]] records public CKA and CKAD
 idea sources, concrete challenge themes, licensing boundaries and the
 original-content workflow. New labs use public behavior sources but author
 fresh task text, fixtures, failure injection, solutions and checks.

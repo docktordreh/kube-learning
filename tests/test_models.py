@@ -57,6 +57,11 @@ def test_owned_must_be_explicit() -> None:
         Lab.model_validate({**BASE, "owned": ["namespace/*"]})
 
 
+def test_exclusive_areas_must_be_unique() -> None:
+    with pytest.raises(ValidationError, match="exclusive"):
+        Lab.model_validate({**BASE, "exclusive": ["network", "network"]})
+
+
 def test_jsonpath_value_required_for_comparisons() -> None:
     with pytest.raises(ValidationError):
         JsonPathCheck.model_validate({"type": "jsonpath", "resource": "pod/x", "jsonpath": "{.a}", "op": "equals"})

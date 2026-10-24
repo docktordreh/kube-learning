@@ -15,9 +15,10 @@ refused rather than adopted.
 * Lab ownership
 
 Namespace labs create namespaces labelled =cka-labs.io/lab=<id>= and delete
-only those labels. Cluster-scoped objects must be explicit =kind/name= entries
-in =owned=. Cleanup has no wildcard Docker volume/image deletion and never runs
-=kubectl delete all=.
+only the exact names declared by the lab. Cluster-scoped objects must be
+explicit =kind/name= entries in =owned=. A fresh run refuses to remove any
+pre-existing declared namespace or object. Cleanup has no wildcard Docker
+volume/image deletion and never runs =kubectl delete all=.
 
 The conformance test creates an unrelated =cka-sentinel/keep-me= ConfigMap.
 Every lab must leave it intact. It also checks that all nodes remain Ready and

@@ -95,6 +95,21 @@ systemctl enable --now containerd
         for path in (self.kubeconfig, self.grader_kubeconfig, self.state_dir / "cluster.json"):
             path.unlink(missing_ok=True)
 
+    def verify_ownership(self) -> None:
+        self._require_owned_project()
+
+    def load_images(self, images: list[str]) -> None:
+        """Ensure component images exist in each guest's containerd cache."""
+        for node in self.nodes():
+            for image in images:
+                quoted = shlex.quote(image)
+                present = self.node_exec(node, f"crictl inspecti {quoted}", timeout=60)
+                if present.ok:
+                    continue
+                pulled = self.node_exec(node, f"crictl pull {quoted}", timeout=900)
+                if not pulled.ok:
+                    raise CkaError(f"could not load {image} on kubeadm node {node}: {pulled.output()}")
+
     def nodes(self) -> dict[str, str]:
         return {
             "controlplane": "control-plane",
@@ -253,6 +268,10 @@ class KubeadmBackend(Backend):
     @property
     def max_extra_clusters(self) -> int:
         return 0
+
+    @property
+    def main_is_dedicated(self) -> bool:
+        return True
 
     def problems(self) -> list[str]:
         problems: list[str] = []

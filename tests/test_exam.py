@@ -1,7 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from cka_labs.engine import catalog
-from cka_labs.engine.exam import _points, _select
+from cka_labs.engine.exam import _check_areas, _points, _select
+from cka_labs.errors import CkaError
 from cka_labs.engine.progress import Progress
 
 
@@ -41,6 +45,15 @@ def test_exam_selection_covers_cks_domains() -> None:
 
 def test_exam_points_increase_with_difficulty() -> None:
     assert [_points(level) for level in range(1, 5)] == [5, 10, 15, 20]
+
+
+def test_exam_rejects_overlapping_resources() -> None:
+    labs = [
+        SimpleNamespace(id="one-001", exclusive=[], namespaces=["shared"], owned=[]),
+        SimpleNamespace(id="two-001", exclusive=[], namespaces=["shared"], owned=[]),
+    ]
+    with pytest.raises(CkaError, match="overlap"):
+        _check_areas(labs)
 
 
 def test_exam_report_is_persisted(tmp_path: Path) -> None:

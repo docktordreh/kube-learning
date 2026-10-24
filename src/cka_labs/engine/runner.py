@@ -59,6 +59,24 @@ class Runner:
         for step in self.lab.setup:
             self.run_step(step, phase="setup")
 
+    def ensure_clean_start(self) -> None:
+        """Refuse to delete resources that were not created by this lab."""
+        self.admin.verify_marker()
+        conflicts: list[str] = []
+        for namespace in self.lab.namespaces:
+            result = self.admin.kubectl(["get", "namespace", namespace, "-o", "name"])
+            if result.ok and result.stdout.strip():
+                conflicts.append(f"namespace/{namespace}")
+        for item in self.lab.owned:
+            result = self.admin.kubectl(["get", item, "-o", "name"])
+            if result.ok and result.stdout.strip():
+                conflicts.append(item)
+        if conflicts:
+            raise CkaError(
+                f"{self.lab.id}: refusing to remove pre-existing resources: {', '.join(conflicts)}; "
+                "use a fresh cka cluster"
+            )
+
     def verify_initial_state(self) -> list[CheckResult]:
         """Goals must fail and guards must pass before the student starts."""
         results = evaluate_all(self.lab.checks, self.context(), settle=False)
@@ -81,9 +99,9 @@ class Runner:
             except CkaError as exc:
                 self.log(f"cleanup step failed (continuing): {exc}")
         # Namespaces first: claims inside them must go before their PersistentVolumes can.
-        if self.lab.namespaces:
+        for namespace in self.lab.namespaces:
             self.admin.kubectl(
-                ["delete", "namespace", "-l", f"{LAB_LABEL}={self.lab.id}", "--wait=true", "--timeout=180s"],
+                ["delete", "namespace", namespace, "--ignore-not-found", "--wait=true", "--timeout=180s"],
                 timeout=200,
             )
         for item in self.lab.owned:
