@@ -100,6 +100,12 @@ class Runner:
                 self.log(f"cleanup step failed (continuing): {exc}")
         # Namespaces first: claims inside them must go before their PersistentVolumes can.
         for namespace in self.lab.namespaces:
+            owned = self.admin.kubectl(
+                ["get", "namespace", "-l", f"{LAB_LABEL}={self.lab.id}", "-o", "name"]
+            )
+            if not owned.ok or f"namespace/{namespace}" not in owned.stdout.splitlines():
+                self.log(f"not deleting namespace/{namespace}: ownership label is absent")
+                continue
             self.admin.kubectl(
                 ["delete", "namespace", namespace, "--ignore-not-found", "--wait=true", "--timeout=180s"],
                 timeout=200,
