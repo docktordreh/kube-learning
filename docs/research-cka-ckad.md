@@ -1,0 +1,114 @@
+# Research: public sources for original CKA and CKAD challenge ideas
+
+Research date: 2026-10-23
+
+## Conclusion
+
+Yes. There are strong public sources beyond any security-certification curriculum:
+
+1. The CNCF CKA and CKAD curricula provide public competency boundaries and domain weightings.
+2. Kubernetes official documentation provides authoritative behavior, task patterns, failure modes, and APIs.
+3. Kubernetes' official examples repository provides permissively licensed manifests and application scenarios.
+4. Kubernetes SIG repositories provide permissively licensed examples for focused APIs such as Kustomize and Gateway API.
+
+Use these sources for **skills and behavior**, not for copying challenge wording, manifests, names, or solution sequences. The result should test a new scenario authored independently by this project.
+
+## Source inventory and concrete themes
+
+### 1. CNCF certification curricula
+
+* [CNCF curriculum repository](https://github.com/cncf/curriculum) — the repository states that its curriculum is available under CC BY 4.0+.
+* [CKA curriculum overview](https://github.com/cncf/curriculum/blob/master/cka/README.md) — domains: cluster architecture/installation/configuration, workloads/scheduling, services/networking, storage, and troubleshooting. The current overview weights troubleshooting highest.
+* [CKAD curriculum overview](https://github.com/cncf/curriculum/blob/master/ckad/README.md) — domains: application design/build, deployment, observability/maintenance, environment/configuration/security, and services/networking.
+
+**Challenge themes derived from the curricula:**
+
+* CKA: recover a node or control-plane component, diagnose a failed rollout, repair service discovery, bind storage correctly, or schedule a workload under node constraints.
+* CKAD: build a multi-container Pod, configure an application from ConfigMaps and Secrets, add probes and resource settings, perform a safe rollout, expose an application, or run scheduled/batch work.
+
+These are competency themes, not copied exam questions. The curriculum describes exam scope, not a grant to use CNCF trademarks or imply endorsement.
+
+### 2. Kubernetes official documentation and tutorials
+
+The documentation is the best source for expected Kubernetes behavior and reproducible starting states:
+
+* [Documentation home](https://kubernetes.io/docs/home/)
+* [Create a cluster with kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/)
+* [Troubleshooting applications](https://kubernetes.io/docs/tasks/debug/debug-application/)
+* [Troubleshooting clusters](https://kubernetes.io/docs/tasks/debug/debug-cluster/)
+* [Configure a Pod with a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/)
+* [Configure liveness, readiness, and startup probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+* [Configure a security context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)
+* [Assign Pods to nodes](https://kubernetes.io/docs/tasks/configure-pod-container/assign-pods-nodes/)
+* [PersistentVolume storage tutorial](https://kubernetes.io/docs/tutorials/configuration/configure-persistent-volume-storage/)
+* [Connect applications with Services](https://kubernetes.io/docs/tutorials/services/connect-applications-service/)
+* [Declare a NetworkPolicy](https://kubernetes.io/docs/tasks/administer-cluster/declare-network-policy/)
+* [Kustomize task](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/)
+* [Run a stateless application with a Deployment](https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/)
+* [Run automated work with a CronJob](https://kubernetes.io/docs/tasks/job/automated-tasks-with-cron-jobs/)
+
+**Concrete original challenge patterns:**
+
+* Start a Deployment with a selector/template mismatch; require the learner to restore rollout health and preserve labels.
+* Provide a Service with wrong selectors or ports; require verification from a separate client Pod.
+* Provide a PVC/PV pair with incompatible class, access mode, or capacity; require a bound claim and data persistence.
+* Give an application a broken probe or ConfigMap key; require diagnosis and a minimal repair.
+* Provide two nodes with labels/taints; require placement using affinity, tolerations, or both.
+* Give a namespace and workload that violate a stated network access rule; require a least-privilege NetworkPolicy.
+* Give a base manifest and environment overlay; require a Kustomize overlay with a changed image, replica count, and configuration.
+* Give a failed kubeadm-style component or node symptom; require evidence-based diagnosis using status, logs, and cluster inspection.
+
+### 3. Official Kubernetes examples
+
+* [kubernetes/examples](https://github.com/kubernetes/examples) — official examples curated by SIG Apps. Its README describes web, database, AI/ML, and other application examples. The repository is Apache-2.0 licensed: [LICENSE](https://github.com/kubernetes/examples/blob/master/LICENSE).
+* [Example guidelines](https://github.com/kubernetes/examples/blob/master/guidelines.md) — useful for selecting examples that are educational, practical, current, and verifiable.
+
+**Concrete themes:** turn a multi-tier example into a broken-service investigation; require scaling or a rolling update; add durable storage to a stateful example; or add a batch operation around an application. Reuse the domain pattern, but author new resource names, data, acceptance checks, and failure injection.
+
+### 4. Official Kubernetes SIG repositories
+
+These are useful when a challenge should test a focused, current Kubernetes workflow:
+
+* [kubernetes-sigs/kustomize](https://github.com/kubernetes-sigs/kustomize) — Apache-2.0; source for Kustomize behavior and examples.
+* [kubernetes-sigs/gateway-api](https://github.com/kubernetes-sigs/gateway-api) — Apache-2.0; contains API specifications, CRDs, conformance material, and examples. Possible theme: route two Services by hostname or path and diagnose an invalid route attachment.
+* [kubernetes-sigs/apiserver-network-proxy kind example](https://github.com/kubernetes-sigs/apiserver-network-proxy/tree/master/examples/kind) — Apache-2.0; possible theme: inspect connectivity through a deliberately misconfigured proxy deployment.
+
+Only select a SIG-project theme when the lab environment actually installs and supports that API. Do not expand a CKA/CKAD lab into an unbounded product-specific exercise.
+
+## Licensing and legal-use caveats
+
+This is practical licensing guidance, not legal advice.
+
+* **CC BY 4.0 curriculum and website content:** attribution, a link to the license/source, and an indication of modifications are required when copying or adapting protected text. The [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/) does not grant trademark rights or permission to imply endorsement. The safest approach is to cite curricula as scope references and write all challenge text from scratch.
+* **Apache-2.0 code, manifests, and examples:** retain copyright/license notices, include the Apache-2.0 license when redistributing copied material, and mark modified files. Check each subdirectory for its own license or NOTICE file; a repository-level license may not cover bundled public material. Apache-2.0 does not grant trademark rights.
+* **Kubernetes documentation:** the website repository is [CC BY 4.0](https://github.com/kubernetes/website/blob/main/LICENSE). Code and example repositories can have different licenses. Verify the exact source file before copying it.
+* **Facts, API names, and general challenge ideas:** copyright generally does not protect an underlying idea or fact, but it can protect the original expression, arrangement, prose, and selection. Do not treat “publicly visible” as “public domain.”
+* **Public images and container content:** inspect image and asset licenses separately. Prefer small, well-known images already permitted by project policy, or build/use project-owned fixtures.
+
+## Recommended original-content workflow
+
+1. **Map scope.** Choose a CKA or CKAD domain from the current CNCF overview. Record source URL, version/date, and intended skill.
+2. **Read behavior sources.** Use Kubernetes docs and, when needed, the relevant API specification. Record the invariant the learner must establish, not copied prose.
+3. **Design a fresh scenario.** Change the actor, resource names, data, topology, and failure mechanism. Combine at most two closely related skills per lab objective.
+4. **Author acceptance checks first.** Define observable end state and guard checks. Ensure the initial fault is reproducible and unrelated resources remain untouched.
+5. **Author fixtures and solution independently.** Do not paste documentation YAML and edit names. Generate a new manifest or write it from the API contract. Keep any copied Apache-licensed material isolated and attributed.
+6. **Perform a provenance review.** For every non-original line, record repository/path, commit or version, license, attribution, and modifications. Remove copied prose unless its license and attribution are intentional.
+7. **Run originality and quality review.** Search for distinctive source phrases, compare manifests structurally, validate on the supported Kubernetes version, and have a reviewer confirm that the task tests behavior rather than source memorization.
+8. **Publish attribution separately.** Include a short Sources/Attribution section in project research or release material. Do not use CNCF/Kubernetes logos, names, or certification marks in a way that suggests official affiliation.
+
+### Suggested provenance record
+
+```text
+challenge: <id>
+scope: CKA|CKAD / <domain>
+behavior_sources:
+  - <URL> (consulted <date>, version if applicable)
+copied_material: none | <path and exact license>
+derived_from: API behavior and scenario pattern only
+original_work: task text, fixtures, setup, solution, checks
+review: license check / originality check / runtime verification
+```
+
+## Bottom line
+
+Public CNCF and Kubernetes sources are sufficient to build a broad, legally supportable idea bank. Treat curricula as scope, official docs as behavior contracts, and Apache-licensed examples as optional implementation references. Keep task wording, scenarios, manifests, faults, and grading logic original.

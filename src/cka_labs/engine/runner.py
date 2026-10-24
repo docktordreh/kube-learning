@@ -14,6 +14,7 @@ from pathlib import Path
 
 from cka_labs import paths, proc
 from cka_labs.backends.base import LAB_LABEL, Cluster
+from cka_labs.engine import components
 from cka_labs.engine.catalog import LabSource, workdir
 from cka_labs.engine.evaluator import CheckResult, GradeContext, evaluate_all, wait_for
 from cka_labs.errors import CkaError
@@ -47,6 +48,7 @@ class Runner:
 
     def setup(self) -> None:
         self.admin.verify_marker()
+        components.ensure(self.cluster, self.lab.requires, self.log)
         paths.ensure(workdir(self.lab.id))
         for namespace in self.lab.namespaces:
             manifest = (

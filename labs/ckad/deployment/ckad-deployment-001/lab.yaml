@@ -1,0 +1,81 @@
+id: ckad-deployment-001
+title: Blue/green switch to a new version
+objectives: [ckad/deployment/strategies, ckad/networking/services]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [ios, storefront, checkout]}
+  app: {choices: [web-app, shop-ui, portal]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}-blue", replicas: 3}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+  - capture: blue_generation
+    resource: "deployment/{{app}}-blue"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.generation}"
+
+checks:
+  - id: green-ready
+    description: "Deployment {{app}}-green has 3 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}-green"
+    replicas: 3
+    timeout: 60
+  - id: traffic-green
+    description: "Every request to http://{{app}} is answered by nginx 1.31 (green)"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command:
+      - sh
+      - -c
+      - >-
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+        wget -S -O /dev/null -T 3 http://{{app}} 2>&1 | grep -q 'Server: nginx/1.31'
+        || { echo "request $i was not answered by nginx 1.31"; exit 1; }; done
+    exec_timeout: 45
+    timeout: 30
+  - id: endpoints
+    role: guard
+    description: "Service {{app}} routes to exactly 3 ready Pods (one colour at a time)"
+    type: service_endpoints
+    namespace: "{{ns}}"
+    service: "{{app}}"
+    min_ready: 3
+    max_ready: 3
+    timeout: 30
+  - id: blue-kept
+    role: guard
+    description: "{{app}}-blue still runs 3 ready replicas as the rollback target"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}-blue"
+    replicas: 3
+  - id: blue-unchanged
+    role: guard
+    description: "Deployment {{app}}-blue was not modified"
+    type: jsonpath
+    resource: "deployment/{{app}}-blue"
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.generation}"
+    value: "{{captured.blue_generation}}"
+
+hints:
+  - "Blue/green runs two complete Deployments side by side; only the Service selector decides which one gets traffic. Compare `kubectl -n {{ns}} get svc {{app}} -o wide` with `kubectl -n {{ns}} get pods --show-labels`."
+  - "`kubectl -n {{ns}} get deploy {{app}}-blue -o yaml` is a good template for green: new name, `color: green` in selector and Pod labels, new image. Wait with `kubectl -n {{ns}} rollout status deploy/{{app}}-green` before you switch."
+  - "Switch by changing only the `color` key of the Service selector, e.g. `kubectl -n {{ns}} patch svc {{app}} -p '{\"spec\":{\"selector\":{\"color\":\"green\"}}}'`. Leave the blue Deployment as it is for a rollback."
+
+competencies:
+  - Releasing a new version with a blue/green Deployment pair
+  - Switching Service traffic atomically through its label selector
+  - Verifying which version answers through the Service
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+  - https://kubernetes.io/docs/concepts/services-networking/service/#defining-a-service
+  - https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/

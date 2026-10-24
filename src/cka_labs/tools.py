@@ -1,16 +1,20 @@
-"""Install pinned kind and kubectl into the cka bin directory and pre-pull lab images.
+"""Install pinned kind, kubectl, kubectl-convert and helm into the cka bin directory, cache
+component artifacts and pre-pull lab images.
 
 Binaries are verified against the SHA-256 files published next to them by the upstream
 projects. Nothing is installed system-wide.
 """
 
 import hashlib
+import io
 import platform
+import tarfile
 import shutil
 import sys
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from cka_labs import paths, proc
 from cka_labs.config import toolchain
@@ -23,6 +27,7 @@ class Download:
     version: str
     url: str
     sha256_url: str
+    member: str | None = None  # path of the binary inside a .tar.gz download
 
 
 def platform_pair() -> tuple[str, str]:
@@ -40,17 +45,29 @@ def downloads() -> list[Download]:
     tc = toolchain()
     kind_url = f"https://github.com/kubernetes-sigs/kind/releases/download/{tc.kind.version}/kind-{system}-{machine}"
     kubectl_url = f"https://dl.k8s.io/release/{tc.kubectl.version}/bin/{system}/{machine}/kubectl"
+    helm_url = f"https://get.helm.sh/helm-{tc.helm.version}-{system}-{machine}.tar.gz"
     return [
         Download("kind", tc.kind.version, kind_url, kind_url + ".sha256sum"),
         Download("kubectl", tc.kubectl.version, kubectl_url, kubectl_url + ".sha256"),
+        Download("kubectl-convert", tc.kubectl.version, kubectl_url + "-convert", kubectl_url + "-convert.sha256"),
+        Download("helm", tc.helm.version, helm_url, helm_url + ".sha256sum", f"{system}-{machine}/helm"),
     ]
+
+
+def _version_file(name: str) -> Path:
+    return paths.bin_dir() / f".{name}.version"
 
 
 def installed_version(name: str) -> str | None:
     binary = paths.bin_dir() / name
     if not binary.is_file():
         return None
-    argv = [str(binary), "version"] if name == "kind" else [str(binary), "version", "--client"]
+    if name == "kubectl-convert":  # has no version command; install() records it
+        version_file = _version_file(name)
+        return version_file.read_text().strip() if version_file.is_file() else None
+    argv = {"kind": [str(binary), "version"], "helm": [str(binary), "version", "--short"]}.get(
+        name, [str(binary), "version", "--client"]
+    )
     result = proc.run(argv, timeout=20)
     return result.stdout.strip() if result.ok else None
 
@@ -73,12 +90,42 @@ def install(download: Download, log: Callable[[str], None]) -> None:
     actual = hashlib.sha256(payload).hexdigest()
     if actual != expected:
         raise CkaError(f"{download.name}: checksum mismatch (expected {expected}, got {actual})")
+    if download.member:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+            member = archive.extractfile(download.member)
+            if member is None:
+                raise CkaError(f"{download.url} has no {download.member}")
+            payload = member.read()
     target = paths.ensure(paths.bin_dir()) / download.name
     temporary = target.with_suffix(".partial")
     temporary.write_bytes(payload)
     temporary.chmod(0o755)
     temporary.replace(target)
+    _version_file(download.name).write_text(download.version + "\n")
     log(f"installed {target} (sha256 {actual[:16]}…)")
+
+
+def artifact_path(component: str) -> Path:
+    spec = toolchain().components[component]
+    return paths.home() / "components" / component / spec.url.rsplit("/", 1)[-1]
+
+
+def cache_artifact(component: str, log: Callable[[str], None]) -> Path:
+    """The component's pinned chart or manifest, downloaded once and verified against its digest."""
+    spec = toolchain().components[component]
+    target = artifact_path(component)
+    if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == spec.sha256:
+        return target
+    log(f"downloading {spec.url}")
+    payload = _fetch(spec.url)
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != spec.sha256:
+        raise CkaError(f"{component}: checksum mismatch (expected {spec.sha256}, got {actual})")
+    paths.ensure(target.parent)
+    temporary = target.with_suffix(".partial")
+    temporary.write_bytes(payload)
+    temporary.replace(target)
+    return target
 
 
 def pull_images(log: Callable[[str], None]) -> None:

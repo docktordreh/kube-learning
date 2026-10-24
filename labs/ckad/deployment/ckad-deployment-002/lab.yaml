@@ -1,0 +1,81 @@
+id: ckad-deployment-002
+title: Canary release behind an unchanged Service
+objectives: [ckad/deployment/strategies, ckad/networking/services]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [frontend, shop, media]}
+  app: {choices: [frontend, storefront, player]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 5}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+  - capture: service_selector
+    resource: "service/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.selector}"
+
+checks:
+  - id: canary-ready
+    description: "Deployment {{app}}-canary has 1 ready replica"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}-canary"
+    replicas: 1
+    timeout: 60
+  - id: stable-scaled
+    description: "Deployment {{app}} has 4 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 4
+    timeout: 60
+  - id: traffic-split
+    description: "The Service answers with both versions, nginx 1.31 (canary) for a minority of requests"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command:
+      - sh
+      - -c
+      - >-
+        c=0; i=0; while [ $i -lt 40 ]; do i=$((i+1));
+        wget -S -O /dev/null -T 3 http://{{app}} 2>&1 | grep -q 'Server: nginx/1.31' && c=$((c+1)); done;
+        echo "$c of 40 requests answered by nginx 1.31"; [ $c -ge 1 ] && [ $c -le 20 ]
+    exec_timeout: 90
+    timeout: 30
+  - id: capacity
+    role: guard
+    description: "Service {{app}} keeps exactly 5 ready Pods"
+    type: service_endpoints
+    namespace: "{{ns}}"
+    service: "{{app}}"
+    min_ready: 5
+    max_ready: 5
+    timeout: 30
+  - id: service-unchanged
+    role: guard
+    description: "Service {{app}} keeps its selector"
+    type: jsonpath
+    resource: "service/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.selector}"
+    value: "{{captured.service_selector}}"
+
+hints:
+  - "A Service spreads requests over all ready Pods its selector matches. Look at `kubectl -n {{ns}} get svc {{app}} -o wide` and `kubectl -n {{ns}} get pods --show-labels`: which labels must a canary Pod carry, and which must it not?"
+  - "Give the canary Deployment its own selector (for example `app={{app}},track=canary`) so it never overlaps with `{{app}}`'s selector. `kubectl -n {{ns}} get endpointslices -l kubernetes.io/service-name={{app}}` should list 5 addresses at the end."
+  - "With 4 stable and 1 canary Pod, about 1 in 5 requests reaches the canary. `kubectl -n {{ns}} scale deploy {{app}} --replicas=4` keeps the total at 5."
+
+competencies:
+  - Running a canary release with a second Deployment behind the same Service
+  - Steering the traffic share through replica counts
+  - Keeping Deployment selectors from overlapping
+
+docs:
+  - https://kubernetes.io/docs/concepts/workloads/management/#canary-deployments
+  - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#scaling-a-deployment
+  - https://kubernetes.io/docs/concepts/services-networking/service/

@@ -1,0 +1,66 @@
+id: troubleshooting-001
+title: CrashLoopBackOff after a configuration change
+objectives: [cka/troubleshooting/logs, cka/workloads/config, ckad/observability/debugging, ckad/environment/configmaps]
+difficulty: 2
+estimated_minutes: 7
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [payments, orders, checkout]}
+  app: {choices: [worker, processor, settler]}
+  mode: {choices: [production, live, primary]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait:
+      type: jsonpath
+      resource: "pods -l app={{app}}"
+      namespace: "{{ns}}"
+      jsonpath: "{.items[0].status.containerStatuses[0].restartCount}"
+      op: gte
+      value: "1"
+    timeout: 120
+  - capture: config
+    resource: "configmap/{{app}}-config"
+    namespace: "{{ns}}"
+    jsonpath: "{.data.settings\\.env}"
+
+checks:
+  - id: available
+    description: "Deployment {{app}} is available (2/2)"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+    timeout: 60
+  - id: config-loaded
+    description: "The worker loaded its settings (MODE={{mode}})"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [cat, /tmp/ready]
+    output_matches: "^{{mode}}$"
+    timeout: 30
+  - id: config-untouched
+    role: guard
+    description: "settings.env content in ConfigMap {{app}}-config unchanged"
+    type: jsonpath
+    resource: "configmap/{{app}}-config"
+    namespace: "{{ns}}"
+    jsonpath: "{.data.settings\\.env}"
+    value: "{{captured.config}}"
+
+hints:
+  - "Look at what the container prints before it dies: `kubectl -n {{ns}} logs deploy/{{app}} --previous`."
+  - "Compare the file path the command tries to read with what is actually mounted: `kubectl -n {{ns}} get deploy {{app}} -o yaml` (command, volumeMounts) and `kubectl -n {{ns}} get cm {{app}}-config -o yaml` (keys)."
+  - "Each ConfigMap key becomes a file named after the key inside the mountPath. Make the command read the file that exists (or project the key under the expected name with `items`). Keep the settings content as it is."
+
+competencies:
+  - Reading current and previous container logs
+  - How ConfigMap volumes map keys to files
+  - Fixing a Deployment's Pod template and verifying the rollout
+
+docs:
+  - https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/
+  - https://kubernetes.io/docs/concepts/configuration/configmap/#using-configmaps-as-files-from-a-pod
+  - https://kubernetes.io/docs/concepts/cluster-administration/logging/

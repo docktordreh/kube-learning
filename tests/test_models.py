@@ -7,8 +7,7 @@ EXISTS = {"id": "a", "description": "d", "type": "exists", "resource": "pod/x", 
 BASE = {
     "id": "networking-999",
     "title": "t",
-    "domain": "networking",
-    "objectives": ["networking/services"],
+    "objectives": ["cka/networking/services", "ckad/networking/services", "cka/troubleshooting/services"],
     "difficulty": 2,
     "estimated_minutes": 5,
     "backends": ["kind"],
@@ -23,6 +22,17 @@ BASE = {
 def test_minimal_lab_parses() -> None:
     lab = Lab.model_validate(BASE)
     assert lab.goal_checks[0].id == "a"
+
+
+def test_certification_and_domain_come_from_objectives() -> None:
+    lab = Lab.model_validate(BASE)
+    assert (lab.cert, lab.domain, lab.certs) == ("cka", "cka/networking", ["cka", "ckad"])
+    assert (lab.domain_in("ckad"), lab.domain_in("cks")) == ("networking", None)
+
+
+def test_objectives_must_be_qualified() -> None:
+    with pytest.raises(ValidationError):
+        Lab.model_validate({**BASE, "objectives": ["networking/services"]})
 
 
 def test_unknown_fields_rejected() -> None:

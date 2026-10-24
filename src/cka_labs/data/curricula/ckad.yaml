@@ -1,0 +1,51 @@
+# Official CKAD curriculum. Source: https://github.com/cncf/curriculum (CKAD_Curriculum_v1.37.pdf,
+# CC-BY 4.0). Verified 2026-10-23. Objective ids (ckad/<domain>/<key>) are referenced by labs,
+# so rename only together with the labs (tests enforce consistency).
+exam: CKAD
+kubernetes_version: "1.37"
+verified: "2026-10-23"
+domains:
+  - id: design-build
+    title: Application Design and Build
+    weight: 20
+    objectives:
+      images: Define, build and modify container images
+      workload-resources: Choose and use the right workload resource (Deployment, DaemonSet, CronJob, etc.)
+      multi-container: Understand multi-container Pod design patterns (e.g. sidecar, init and others)
+      volumes: Utilize persistent and ephemeral volumes
+  - id: deployment
+    title: Application Deployment
+    weight: 20
+    objectives:
+      strategies: Use Kubernetes primitives to implement common deployment strategies (e.g. blue/green or canary)
+      rolling-updates: Understand Deployments and how to perform rolling updates
+      helm: Use the Helm package manager to deploy existing packages
+      kustomize: Kustomize
+  - id: observability
+    title: Application Observability and Maintenance
+    weight: 15
+    objectives:
+      api-deprecations: Understand API deprecations
+      probes: Implement probes and health checks
+      monitoring: Use built-in CLI tools to monitor Kubernetes applications
+      logs: Utilize container logs
+      debugging: Debugging in Kubernetes
+  - id: environment
+    title: Application Environment, Configuration and Security
+    weight: 25
+    objectives:
+      crds-operators: Discover and use resources that extend Kubernetes (CRD, Operators)
+      access-control: Understand authentication, authorization and admission control
+      requests-limits-quotas: Understand requests, limits, quotas
+      resource-requirements: Define resource requirements
+      configmaps: Understand ConfigMaps
+      secrets: Create & consume Secrets
+      service-accounts: Understand ServiceAccounts
+      security-contexts: Understand Application Security (SecurityContexts, Capabilities, etc.)
+  - id: networking
+    title: Services and Networking
+    weight: 20
+    objectives:
+      network-policies: Demonstrate basic understanding of NetworkPolicies
+      services: Provide and troubleshoot access to applications via services
+      ingress: Use Ingress rules to expose applications

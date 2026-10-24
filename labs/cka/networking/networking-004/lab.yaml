@@ -1,0 +1,105 @@
+id: networking-004
+title: Migrate an Ingress to a Gateway with a weighted canary
+objectives: [cka/networking/gateway-api, cka/networking/ingress]
+difficulty: 3
+estimated_minutes: 12
+backends: [kind, kubeadm]
+requires: [traefik]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [shop, store, market]}
+  host: {choices: [shop.example.test, store.example.test, market.example.test]}
+  ingress: {choices: [shop, storefront, main]}
+  gateway: {choices: [web-gateway, edge-gateway, public-gateway]}
+  route: {choices: [web-route, shop-route, main-route]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: api}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: web-v1}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: web-v2}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+  # The Ingress works before the student starts.
+  - wait:
+      id: ingress-serves
+      description: "Ingress {{ingress}} routes {{host}}"
+      type: exec
+      namespace: "{{ns}}"
+      pod: client
+      command: [wget, -qO-, -T, "3", --header, "Host: {{host}}", "http://traefik.traefik.svc.cluster.local/"]
+      output_matches: "served by web-v1"
+    timeout: 90
+
+checks:
+  - id: gateway-programmed
+    description: "Gateway {{gateway}} is accepted and programmed by Traefik"
+    type: jsonpath
+    resource: "gateways.gateway.networking.k8s.io/{{gateway}}"
+    namespace: "{{ns}}"
+    jsonpath: '{.status.conditions[?(@.type=="Programmed")].status}'
+    value: "True"
+    timeout: 60
+  - id: route-accepted
+    description: "HTTPRoute {{route}} is accepted by its Gateway"
+    type: jsonpath
+    resource: "httproutes.gateway.networking.k8s.io/{{route}}"
+    namespace: "{{ns}}"
+    jsonpath: '{.status.parents[*].conditions[?(@.type=="Accepted")].status}'
+    value: "True"
+    timeout: 60
+  - id: ingress-removed
+    description: "Ingress {{ingress}} is gone"
+    type: exists
+    resource: "ingresses.networking.k8s.io/{{ingress}}"
+    namespace: "{{ns}}"
+    present: false
+  - id: weighted-split
+    description: "http://{{host}}/ is split between web-v1 and a minority share of web-v2"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command:
+      - sh
+      - -c
+      - >-
+        v1=0; v2=0; i=0; while [ $i -lt 40 ]; do i=$((i+1));
+        out=$(wget -qO- -T 3 --header 'Host: {{host}}' http://traefik.traefik.svc.cluster.local/ 2>&1);
+        case "$out" in "served by web-v1") v1=$((v1+1));; "served by web-v2") v2=$((v2+1));; esac; done;
+        echo "web-v1: $v1, web-v2: $v2 of 40"; [ $((v1+v2)) -eq 40 ] && [ $v2 -ge 1 ] && [ $v2 -le 20 ]
+    exec_timeout: 90
+    timeout: 30
+  - id: api-route
+    role: guard
+    description: "http://{{host}}/api keeps reaching the api Service"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", --header, "Host: {{host}}", "http://traefik.traefik.svc.cluster.local/api"]
+    output_matches: "^served by api$"
+    timeout: 30
+  - id: other-hosts-unrouted
+    role: guard
+    description: "Requests for other hosts are not routed into {{ns}}"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [sh, -c, "wget -qO- -T 3 --header 'Host: other.{{host}}' http://traefik.traefik.svc.cluster.local/api 2>&1; true"]
+    output_matches: "404 Not Found"
+    timeout: 30
+
+hints:
+  - "Gateway API splits the Ingress into roles: a GatewayClass (here `traefik`, provided by the cluster), a Gateway with listeners, and HTTPRoutes that attach to it via `parentRefs`. `kubectl get gatewayclass` and `kubectl explain httproute.spec.rules.backendRefs` help."
+  - "Traefik binds a Gateway listener to the entrypoint with the same port, so the listener needs `port: 8000` and `protocol: HTTP`. Watch `kubectl -n {{ns}} get gateway,httproute` and the conditions in `kubectl -n {{ns}} describe gateway {{gateway}}` / `describe httproute {{route}}`."
+  - "One rule matches `PathPrefix /api` with a single backendRef; a second rule matches `/` with two backendRefs, `web-v1` (`weight: 80`) and `web-v2` (`weight: 20`). Delete the Ingress last, once the route is Accepted, so traffic never stops."
+
+competencies:
+  - Creating a Gateway listener for a GatewayClass
+  - Writing HTTPRoute path rules and weighted backends
+  - Reading Gateway and HTTPRoute status conditions
+  - Migrating Ingress rules to the Gateway API without downtime
+
+docs:
+  - https://kubernetes.io/docs/concepts/services-networking/gateway/
+  - https://gateway-api.sigs.k8s.io/guides/http-routing/
+  - https://gateway-api.sigs.k8s.io/guides/traffic-splitting/
+  - https://gateway-api.sigs.k8s.io/guides/migrating-from-ingress/

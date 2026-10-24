@@ -7,6 +7,7 @@ import shlex
 import shutil
 import sys
 import time
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -19,32 +20,41 @@ from rich.table import Table
 
 from cka_labs import paths, proc, tools
 from cka_labs.backends import Cluster, get_backend
-from cka_labs.config import curriculum
+from cka_labs.backends.kind import KindCluster
+from cka_labs.config import DEFAULT_CERT, curricula, curriculum, toolchain
 from cka_labs.engine import catalog, selection
 from cka_labs.engine.exam import ExamService, ExamState, load_exam
 from cka_labs.engine.evaluator import CheckResult
 from cka_labs.engine.lifecycle import ActiveLab, LabService, find_cluster, load_session
-from cka_labs.engine.progress import Progress
+from cka_labs.engine.progress import HALF_LIFE_DAYS, Progress, readiness
 from cka_labs.errors import CkaError
 from cka_labs.models import DIFFICULTY_NAMES, Lab
 
 console = Console()
 err = Console(stderr=True)
 
-app = typer.Typer(help="CKA practice labs and mock exams on disposable local clusters.", no_args_is_help=True)
+app = typer.Typer(
+    help="Kubernetes certification (CKA, CKAD, CKS) practice labs and mock exams on disposable local clusters.",
+    no_args_is_help=True,
+)
 lab_app = typer.Typer(help="Practice labs.", no_args_is_help=True)
 cluster_app = typer.Typer(help="Manage the disposable practice clusters.", no_args_is_help=True)
 node_app = typer.Typer(help="Node access (like `ssh` in the exam).", no_args_is_help=True)
 dev_app = typer.Typer(help="Lab authoring and verification.", no_args_is_help=True)
+image_app = typer.Typer(help="Container images you build for labs.", no_args_is_help=True)
 exam_app = typer.Typer(help="Timed mock examinations (no hints or solutions).", no_args_is_help=True)
 app.add_typer(lab_app, name="lab")
 app.add_typer(cluster_app, name="cluster")
 app.add_typer(node_app, name="node")
 app.add_typer(dev_app, name="dev")
 app.add_typer(exam_app, name="exam")
+app.add_typer(image_app, name="image")
 
 BackendOpt = Annotated[
     str | None, typer.Option("--backend", "-b", help="kind (default) or kubeadm; env CKA_BACKEND")
+]
+CertOpt = Annotated[
+    str | None, typer.Option("--cert", "-c", help="Certification: cka (default), ckad, cks; env CKA_CERT")
 ]
 
 
@@ -59,6 +69,12 @@ def backend_name(option: str | None) -> str:
     if session:
         return session.backend
     return os.environ.get("CKA_BACKEND", "kind")
+
+
+def cert_name(option: str | None) -> str:
+    name = option or os.environ.get("CKA_CERT") or DEFAULT_CERT
+    curriculum(name)  # unknown certification -> CkaError
+    return name
 
 
 def parse_difficulty(value: str | None) -> int | None:
@@ -97,10 +113,11 @@ def fmt_minutes(seconds: float) -> str:
 
 
 def show_task(lab: Lab, task: str, kubeconfig: str) -> None:
+    certs = ", ".join(curriculum(cert).exam for cert in lab.certs)
     header = (
         f"[bold]{lab.id}[/bold] — {lab.title}\n"
-        f"domain: {curriculum().domain(lab.domain).title} · difficulty: {difficulty_label(lab.difficulty)} · "
-        f"target: {lab.estimated_minutes} min"
+        f"domain: {curriculum(lab.cert).domain(lab.domain_in(lab.cert) or '').title} · "
+        f"difficulty: {difficulty_label(lab.difficulty)} · target: {lab.estimated_minutes} min · counts for {certs}"
     )
     console.print(Panel(header, expand=False))
     console.print(Markdown(task))
@@ -117,9 +134,11 @@ def show_task(lab: Lab, task: str, kubeconfig: str) -> None:
 def setup(
     images: Annotated[bool, typer.Option(help="Pull node and lab images for offline use")] = True,
 ) -> None:
-    """Install pinned kind + kubectl into the cka directory and cache images."""
+    """Install pinned kind, kubectl, kubectl-convert and helm, and cache components and images."""
     for download in tools.downloads():
         tools.install(download, log)
+    for component in toolchain().components:
+        tools.cache_artifact(component, log)
     if images:
         tools.pull_images(log)
     console.print(f"[green]ready.[/green] Tools in {paths.bin_dir()}. Next: [bold]cka lab start[/bold]")
@@ -132,8 +151,9 @@ def doctor() -> None:
     table.add_row("platform", f"{sys.platform} {platform.machine()}")
     table.add_row("python", sys.version.split()[0])
     table.add_row("data dir", str(paths.home()))
-    table.add_row("exam target", f"CKA, Kubernetes v{curriculum().kubernetes_version} (verified {curriculum().verified})")
-    for name in ("kind", "kubectl"):
+    for c in curricula().values():
+        table.add_row(f"curriculum {c.id}", f"{c.exam}, Kubernetes v{c.kubernetes_version} (verified {c.verified})")
+    for name in ("kind", "kubectl", "kubectl-convert", "helm"):
         table.add_row(name, tools.installed_version(name) or "[red]missing (cka setup)[/red]")
     table.add_row("docker", "ok" if shutil.which("docker") and proc.run(["docker", "info"], timeout=20).ok else "[red]unavailable[/red]")
     table.add_row("/dev/kvm", "present" if os.path.exists("/dev/kvm") else "absent (kubeadm backend falls back to slow emulation)")
@@ -196,24 +216,33 @@ def cluster_status(backend: BackendOpt = None) -> None:
 
 @lab_app.command("list")
 def lab_list(
-    domain: Annotated[str | None, typer.Option(help="Filter by domain id")] = None,
+    cert: Annotated[str | None, typer.Option("--cert", "-c", help="Only labs counting for cka, ckad, cks, ...")] = None,
+    domain: Annotated[str | None, typer.Option(help="Filter by domain id of --cert (default cka)")] = None,
     difficulty: Annotated[str | None, typer.Option(help="1-4 or name")] = None,
     backend: BackendOpt = None,
 ) -> None:
-    """List available labs."""
+    """List available labs (all certifications unless --cert is given)."""
+    if domain and not cert:
+        cert = cert_name(None)
+    if cert:
+        curriculum(cert)
     level = parse_difficulty(difficulty)
     stats = Progress().lab_stats()
     table = Table(header_style="bold")
-    for column in ("id", "title", "domain", "lvl", "min", "backends", "done"):
+    for column in ("id", "title", "domain", "certs", "lvl", "min", "backends", "done"):
         table.add_column(column)
     for lab in all_labs():
-        if (domain and lab.domain != domain) or (level and lab.difficulty != level):
+        if (cert and cert not in lab.certs) or (domain and lab.domain_in(cert or "") != domain):
             continue
-        if backend and backend not in lab.backends:
+        if (level and lab.difficulty != level) or (backend and backend not in lab.backends):
             continue
         s = stats.get(lab.id)
         done = f"{s.clean_passes}/{s.attempts}" if s else ""
-        table.add_row(lab.id, lab.title, lab.domain, str(lab.difficulty), str(lab.estimated_minutes), ",".join(lab.backends), done)
+        shown = f"{cert}/{lab.domain_in(cert)}" if cert else lab.domain
+        table.add_row(
+            lab.id, lab.title, shown, ",".join(lab.certs), str(lab.difficulty), str(lab.estimated_minutes),
+            ",".join(lab.backends), done,
+        )
     console.print(table)
 
 
@@ -221,14 +250,19 @@ def lab_list(
 def lab_start(
     lab_id: Annotated[str | None, typer.Argument(help="Lab id; omit for an adaptive recommendation")] = None,
     backend: BackendOpt = None,
+    cert: CertOpt = None,
     seed: Annotated[int | None, typer.Option(help="Scenario seed (same seed = same scenario)")] = None,
 ) -> None:
     """Provision a lab, inject its fault, verify the broken state and show the task."""
     name = backend or os.environ.get("CKA_BACKEND", "kind")
     if lab_id is None:
         progress = Progress()
+        target = cert_name(cert)
         choice = selection.recommend(
-            selection.filter_labs(all_labs(), backend=name), progress.objective_stats(), progress.lab_stats()
+            selection.filter_labs(all_labs(), backend=name, cert=target),
+            progress.objective_stats(),
+            progress.lab_stats(),
+            cert=target,
         )
         log(f"recommended {choice.lab.id}: {choice.reason}")
         lab_id = choice.lab.id
@@ -288,6 +322,8 @@ def _debrief(service: LabService, session: ActiveLab, lab: Lab) -> None:
         console.print(Panel(Markdown(explanation), title="debrief", expand=False))
     console.print("[bold]Competencies:[/bold] " + "; ".join(lab.competencies))
     console.print("[bold]Docs:[/bold]\n  " + "\n  ".join(lab.docs))
+    if lab.source is not None:
+        console.print(f"[dim]Adapted from {escape(lab.source.url)} ({escape(lab.source.license)})[/dim]")
     console.print("[dim]Reference solution: cka lab solution · next: cka lab stop && cka lab start[/dim]")
 
 
@@ -312,8 +348,10 @@ def lab_solution(
 def lab_reset() -> None:
     """Restore the lab's initial broken state (same scenario seed)."""
     service = LabService(log=log)
+    solved = service.require_session().solved
     session = service.reset()
-    console.print(f"[green]{session.lab_id} reset[/green]; the timer keeps running.")
+    note = "new attempt started" if solved else "the timer keeps running"
+    console.print(f"[green]{session.lab_id} reset[/green]; {note}.")
 
 
 @lab_app.command("stop")
@@ -336,18 +374,21 @@ def lab_env() -> None:
 @exam_app.command("start")
 def exam_start(
     backend: BackendOpt = None,
+    cert: CertOpt = None,
     duration: Annotated[int, typer.Option("--duration", help="Time limit in minutes")] = 120,
     pass_percent: Annotated[int, typer.Option("--pass-percent", help="Locally computed passing threshold")] = 66,
     seed: Annotated[int | None, typer.Option(help="Reproduce the same task selection")] = None,
 ) -> None:
     """Provision a balanced timed mock exam. The timer starts after setup completes."""
     service = ExamService(log=log)
-    exam = service.start(backend_name(backend), duration_minutes=duration, pass_percent=pass_percent, seed=seed)
+    exam = service.start(
+        backend_name(backend), cert=cert_name(cert), duration_minutes=duration, pass_percent=pass_percent, seed=seed
+    )
     console.print(
         Panel(
-            f"[bold]Exam {exam.exam_id} started[/bold]\n"
+            f"[bold]{curriculum(exam.cert).exam} exam {exam.exam_id} started[/bold]\n"
             f"{len(exam.tasks)} tasks · {exam.duration_minutes} minutes · local pass threshold {exam.pass_percent}%\n"
-            f"seed {exam.seed} · this is not an official CKA score",
+            f"seed {exam.seed} · this is not an official {curriculum(exam.cert).exam} score",
             title="mock exam",
             expand=False,
         )
@@ -482,6 +523,53 @@ def _active_kubeconfig() -> str:
     return str(get_backend(backend_name(None)).main().kubeconfig)
 
 
+def _lab_cluster() -> Cluster:
+    """The cluster labs work on: CKA_CLUSTER (set for lab setup scripts), else the active exam's
+    or lab's cluster, else the backend's main cluster."""
+    if os.environ.get("CKA_CLUSTER"):
+        return find_cluster(backend_name(None), os.environ["CKA_CLUSTER"])
+    from cka_labs.engine import exam as exam_engine
+
+    exam = exam_engine.load_exam()
+    if exam is not None:
+        return get_backend(exam.backend).main()
+    session = load_session()
+    if session:
+        return find_cluster(session.backend, session.cluster)
+    return get_backend(backend_name(None)).main()
+
+
+@image_app.command("load")
+def image_load(
+    images: Annotated[list[str] | None, typer.Argument(help="Images in the host's Docker, e.g. myapp:2.0")] = None,
+    archive: Annotated[
+        Path | None, typer.Option(help="Load an image archive instead (docker save, podman save, OCI)")
+    ] = None,
+) -> None:
+    """Copy images you built on this host into every node of the lab cluster (kind backend).
+
+    Never pulls: an image missing from the host's Docker is an error. Pods then use it with
+    `imagePullPolicy: Never` or `IfNotPresent`."""
+    if bool(images) == (archive is not None):
+        raise CkaError("give image names or --archive, not both")
+    cluster = _lab_cluster()
+    if not isinstance(cluster, KindCluster):
+        raise CkaError("`cka image load` supports the kind backend only")
+    cluster.admin().verify_marker()
+    if archive is not None:
+        if not archive.is_file():
+            raise CkaError(f"{archive} is not a file")
+        cluster.load_archive(archive.resolve())
+        console.print(f"loaded {archive} into {cluster.name}")
+        return
+    names = images or []
+    missing = [name for name in names if not proc.run(["docker", "image", "inspect", name], timeout=30).ok]
+    if missing:
+        raise CkaError(f"not in the host's Docker: {', '.join(missing)} (build or pull it first)")
+    cluster.load_images(names)
+    console.print(f"loaded {', '.join(names)} into {cluster.name}")
+
+
 @app.command()
 def shell() -> None:
     """Open a sub-shell wired to the practice cluster (KUBECONFIG, kubectl, alias k)."""
@@ -548,44 +636,111 @@ def node_list(backend: BackendOpt = None) -> None:
 
 @app.command()
 def practice(
-    domain: Annotated[str | None, typer.Option(help="architecture|workloads|networking|storage|troubleshooting")] = None,
+    cert: CertOpt = None,
+    domain: Annotated[str | None, typer.Option(help="Domain id of the certification (see `cka progress`)")] = None,
     difficulty: Annotated[str | None, typer.Option(help="1-4 or fundamentals|intermediate|advanced|exam")] = None,
     weakest: Annotated[bool, typer.Option("--weakest", help="Target your weakest attempted objective")] = False,
     backend: BackendOpt = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Only show the choice")] = False,
 ) -> None:
-    """Pick the next lab adaptively and start it."""
+    """Pick the next lab adaptively for one certification and start it."""
     name = backend or os.environ.get("CKA_BACKEND", "kind")
+    target = cert_name(cert)
     progress = Progress()
-    labs = selection.filter_labs(all_labs(), backend=name, domain=domain, difficulty=parse_difficulty(difficulty))
+    labs = selection.filter_labs(
+        all_labs(), backend=name, cert=target, domain=domain, difficulty=parse_difficulty(difficulty)
+    )
     pick = selection.weakest if weakest else selection.recommend
-    choice = pick(labs, progress.objective_stats(), progress.lab_stats())
+    choice = pick(labs, progress.objective_stats(), progress.lab_stats(), cert=target)
     console.print(f"[bold]{choice.lab.id}[/bold] {escape(choice.lab.title)}\n[dim]why: {escape(choice.reason)}[/dim]")
     if not dry_run:
         _start(choice.lab.id, name, None)
 
 
+def _pace(pace: float) -> str:
+    colour = "red" if pace > 2 else "yellow" if pace > 1 else "green"
+    return f"[{colour}]{pace:.1f}×[/{colour}]"
+
+
+def _check_description(lab_id: str, check_id: str) -> str:
+    """Unrendered description from lab.yaml (placeholders such as {{app}} stay visible)."""
+    try:
+        checks = catalog.get(lab_id).raw.get("checks")
+    except CkaError:
+        return ""
+    for check in checks if isinstance(checks, list) else []:
+        if isinstance(check, dict) and check.get("id") == check_id:
+            return str(check.get("description", ""))
+    return ""
+
+
+def _lab_history(progress: Progress, lab_id: str, as_json: bool) -> None:
+    catalog.get(lab_id)  # unknown lab -> CkaError
+    history = progress.lab_history(lab_id)
+    if as_json:
+        print(json.dumps(history, indent=2, default=str))
+        return
+    table = Table(header_style="bold", title=f"{lab_id} attempts")
+    for column in ("#", "started", "mode", "status", "min", "target", "hints", "solution", "checks", "failed checks"):
+        table.add_column(column)
+    for a in history:
+        table.add_row(
+            str(a["id"]),
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(a["started_at"])),
+            a["mode"],
+            a["status"],
+            f"{(a['ended_at'] - a['started_at']) / 60:.1f}" if a["ended_at"] is not None else "",
+            str(a["estimated_minutes"] or ""),
+            f"{a['hints_used']}/{a['hints_total']}" if a["hints_total"] is not None else str(a["hints_used"]),
+            "yes" if a["solution_viewed"] else "",
+            str(a["checks_run"]),
+            escape(", ".join(f"{check}×{n}" for check, n in a["failed_checks"].items())),
+        )
+    console.print(table if history else f"no attempts of {lab_id} yet")
+
+
 @app.command("progress")
 def progress_cmd(
+    lab_id: Annotated[str | None, typer.Argument(help="Show the attempt history of one lab")] = None,
+    cert: CertOpt = None,
     as_json: Annotated[bool, typer.Option("--json", help="Export everything as JSON")] = False,
 ) -> None:
-    """Show progress per curriculum objective and the weakest areas."""
+    """Show progress per curriculum objective of one certification, exam readiness and the most failed checks."""
     progress = Progress()
+    if lab_id is not None:
+        _lab_history(progress, lab_id, as_json)
+        return
     if as_json:
         print(json.dumps(progress.export(), indent=2, default=str))
         return
+    target = curriculum(cert_name(cert))
     stats = progress.objective_stats()
     covered: dict[str, int] = {}
     for lab in all_labs():
         for objective in lab.objectives:
             covered[objective] = covered.get(objective, 0) + 1
-    table = Table(header_style="bold", title="Objectives (weakness = 1 − (clean passes + 1)/(attempts + 2))")
-    for column in ("objective", "labs", "attempts", "clean", "avg min", "hints", "weakness"):
+    table = Table(
+        header_style="bold",
+        title=f"{target.exam} objectives (weakness = 1 − (Σw·credit + 1)/(Σw + 2); hints cost up to 0.5 credit per pass; "
+        f"w halves every {HALF_LIFE_DAYS} days; pace = time to pass ÷ target; readiness = mean mastery, "
+        "mastery = max(0, 1 − 2·weakness))",
+    )
+    for column in ("objective", "labs", "attempts", "clean", "credit", "avg min", "pace", "hints", "weakness"):
         table.add_column(column)
-    for domain in curriculum().domains:
-        table.add_row(f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "")
+    weighted = total_weight = 0.0
+    for domain in target.domains:
+        ids = [f"{target.id}/{domain.id}/{key}" for key in domain.objectives]
+        practisable = [objective for objective in ids if covered.get(objective)]
+        ready = readiness(stats, practisable)
+        if practisable:
+            weighted += domain.weight * ready
+            total_weight += domain.weight
+        table.add_row(
+            f"[bold]{domain.title} ({domain.weight}%)[/bold]", "", "", "", "", "", "", "",
+            f"[bold]ready {ready:.0%}[/bold]" if practisable else "",
+        )
         for key, title in domain.objectives.items():
-            objective = f"{domain.id}/{key}"
+            objective = f"{target.id}/{domain.id}/{key}"
             s = stats.get(objective)
             weakness = s.weakness if s else selection.UNTRIED_WEAKNESS
             colour = "red" if weakness > 0.5 else "yellow" if weakness > 0.3 else "green"
@@ -594,14 +749,29 @@ def progress_cmd(
                 str(covered.get(objective, 0)),
                 str(s.attempts if s else 0),
                 str(s.clean_passes if s else 0),
+                f"{s.credit:.1f}" if s else "0",
                 f"{s.avg_minutes:.1f}" if s and s.avg_minutes is not None else "",
+                _pace(s.pace) if s and s.pace is not None else "",
                 str(s.hints if s else 0),
                 f"[{colour}]{weakness:.2f}[/{colour}]",
             )
     console.print(table)
+    if total_weight:
+        console.print(
+            f"[bold]{target.exam} exam readiness: {weighted / total_weight:.0%}[/bold] "
+            "[dim](curriculum-weighted; objectives without labs are excluded)[/dim]"
+        )
     failed = progress.top_failed_checks(5)
     if failed:
-        console.print("[bold]Most failed checks:[/bold] " + ", ".join(f"{lab}:{check}×{n}" for lab, check, n in failed))
+        checks = Table(header_style="bold", title="Most failed checks (first try = knowledge gap; runs include retries)")
+        for column in ("lab", "check", "description", "first try", "attempts", "runs"):
+            checks.add_column(column)
+        for f in failed:
+            checks.add_row(
+                f.lab_id, f.check_id, escape(_check_description(f.lab_id, f.check_id)),
+                str(f.first_try), str(f.attempts), str(f.runs),
+            )
+        console.print(checks)
     exams = progress.exams()
     if exams:
         last = exams[-1]

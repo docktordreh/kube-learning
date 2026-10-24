@@ -11,8 +11,9 @@ import json
 import os
 import shutil
 import tempfile
+from pathlib import Path
 
-from cka_labs import paths, proc
+from cka_labs import paths, proc, tools
 from cka_labs.backends.base import Backend, Cluster
 from cka_labs.config import toolchain
 from cka_labs.errors import CkaError, SafetyError
@@ -144,7 +145,30 @@ class KindCluster(Cluster):
             if not proc.run(["docker", "image", "inspect", image], timeout=30).ok:
                 proc.run(["docker", "pull", image], timeout=600, check=True)
         if images:
-            proc.run(["kind", "load", "docker-image", f"--name={self.name}", *images], timeout=900, check=True)
+            _, machine = tools.platform_pair()
+            with tempfile.TemporaryDirectory(prefix="cka-images-") as directory:
+                archive = os.path.join(directory, "images.tar")
+                proc.run(
+                    [
+                        "docker",
+                        "image",
+                        "save",
+                        f"--platform=linux/{machine}",
+                        f"--output={archive}",
+                        *images,
+                    ],
+                    timeout=900,
+                    check=True,
+                )
+                proc.run(
+                    ["kind", "load", "image-archive", archive, f"--name={self.name}"],
+                    timeout=900,
+                    check=True,
+                )
+
+    def load_archive(self, archive: Path) -> None:
+        """Import an image archive (docker save, podman save, OCI) into every node."""
+        proc.run(["kind", "load", "image-archive", str(archive), f"--name={self.name}"], timeout=900, check=True)
 
     def _require_owned_container(self, container: str) -> None:
         """Only ever exec into containers that kind labelled as part of this cluster."""

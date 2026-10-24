@@ -3,9 +3,10 @@
 import itertools
 import re
 
-from cka_labs.config import curriculum, toolchain
-from cka_labs.engine import catalog
+from cka_labs.config import objective_ids, toolchain
+from cka_labs.engine import catalog, components
 from cka_labs.engine.catalog import LabSource
+from cka_labs.engine.generator import DEFERRED_PREFIX, TOKEN
 from cka_labs.errors import CkaError
 from cka_labs.models import ApplyStep
 
@@ -43,13 +44,15 @@ def validate_lab(source: LabSource) -> list[str]:
     except CkaError as exc:
         return [f"{prefix}: {exc}"]
 
-    if source.directory.parent.name != lab.domain:
-        problems.append(f"{prefix}: lives in labs/{source.directory.parent.name} but domain is {lab.domain}")
-    known = curriculum().objective_ids()
+    home = f"{source.directory.parent.parent.name}/{source.directory.parent.name}"
+    if home != lab.domain:
+        problems.append(f"{prefix}: lives in labs/{home} but its primary objective is in {lab.domain}")
+    known = objective_ids()
     problems += [f"{prefix}: unknown objective {o}" for o in lab.objectives if o not in known]
     if len(lab.hints) < MIN_HINTS:
         problems.append(f"{prefix}: needs at least {MIN_HINTS} progressive hints")
     problems += [f"{prefix}: docs must be https URLs: {d}" for d in lab.docs if not d.startswith("https://")]
+    problems += [f"{prefix}: unknown requirement {r}" for r in lab.requires if r not in components.known()]
     if lab.isolation == "namespace" and not (lab.namespaces or lab.owned):
         problems.append(f"{prefix}: namespace-isolated labs must declare the namespaces or resources they own")
 
@@ -60,7 +63,7 @@ def validate_lab(source: LabSource) -> list[str]:
             rendered = source.load(values)
             for name in ("task.md", "solution.sh", "explanation.md"):
                 text = source.read(name, values)
-                if "{{" in text:
+                if any(m.group(1).startswith(DEFERRED_PREFIX) for m in TOKEN.finditer(text)):
                     problems.append(f"{prefix}: {name} references deferred values (captured.*)")
             for step in [*rendered.setup, *rendered.cleanup]:
                 if isinstance(step, ApplyStep):

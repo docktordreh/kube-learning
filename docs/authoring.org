@@ -2,7 +2,7 @@
 
 * Directory contract
 
-Create =labs/<domain>/<domain>-NNN/= with:
+Create =labs/<cert>/<domain>/<name>-NNN/= with:
 
 | file             | audience / purpose                        |
 |------------------+-------------------------------------------|
@@ -11,6 +11,12 @@ Create =labs/<domain>/<domain>-NNN/= with:
 | =solution.sh=    | hidden reference solution                 |
 | =explanation.md= | hidden debrief and production recognition |
 | =manifests/=     | declarative fixture inputs                |
+
+=objectives= lists ids of the form =<cert>/<domain>/<key>= from
+=src/cka_labs/data/curricula/<cert>.yaml=. The first objective is the primary
+one: it decides the lab's directory, and the lab counts toward that domain in
+exams. List an objective of another certification only when the lab really
+practises it. A lab counts toward each certification it has an objective in.
 
 The schema is strict Pydantic. Template strings use ={{name}}= and are chosen
 from =params= with a persisted seed. Unknown names are errors. =captured.*=
@@ -28,6 +34,19 @@ Checks have two roles:
 - =goal=: must fail immediately after setup and pass after the student fix.
 - =guard=: must pass immediately after setup and remain true, catching
   collateral changes or a security-policy weakening.
+
+A lab that needs a pinned tool or a shared cluster component lists it in
+=requires=: =helm= or =kubectl-convert= (binaries from =cka setup=) or a component from
+=toolchain.yaml= such as =traefik= (Ingress and Gateway API controller; it
+pulls in =gateway-api=, the CRDs). Components are installed once per cluster
+before the lab's setup, dependencies first. They never belong to a lab; do not list their
+namespaces. Setup scripts can copy files shipped with the lab (for example a
+chart) from ={{lab.dir}}= into ={{workdir}}=.
+
+Images built during a lab come from the host's Docker and reach kind nodes
+through =cka image load=; mark such manifest lines with =cka: unlisted-image=,
+use =imagePullPolicy: Never=, restrict the lab to =backends: [kind]=, and
+remove exactly those image names in =cleanup=.
 
 Prefer =service_endpoints=, =pods_ready=, traffic, RBAC
 SubjectAccessReviews, and mounted-file behavior over comparing submitted YAML.
@@ -56,3 +75,11 @@ The conformance report is the completion criterion. It must show intended
 failure, reference pass, reset restoration, and scoped cleanup. If a lab needs
 VM/kernel/control-plane operations, use =backends: [kubeadm]= or both and do
 not fake that behavior in kind.
+
+* Original content
+
+Write task text, fixtures, solutions and checks independently from public
+curriculum and behavior sources. Use public sources for API behavior and
+competency boundaries, not for copied challenge text, manifests, names or
+solution sequences. Do not copy closed course material or imply affiliation
+with a certification provider.

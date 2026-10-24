@@ -1,0 +1,66 @@
+id: cks-microservice-vulnerabilities-001
+title: Enforce the restricted Pod Security Standard on a namespace
+objectives:
+  - cks/microservice-vulnerabilities/pod-security-standards
+  - cks/system-hardening/kernel-hardening
+  - ckad/environment/security-contexts
+difficulty: 3
+estimated_minutes: 12
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [payments, billing, ledger]}
+  app: {choices: [checkout, invoices, statements]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 2}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+
+checks:
+  - id: enforce-restricted
+    description: "Namespace {{ns}} enforces the restricted Pod Security Standard"
+    type: jsonpath
+    resource: "namespace/{{ns}}"
+    jsonpath: '{.metadata.labels.pod-security\.kubernetes\.io/enforce}'
+    value: restricted
+  - id: hardened-process
+    description: "{{app}} runs as non-root with no capabilities, no_new_privs and a seccomp filter"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "id -u; grep -E '^(CapEff|NoNewPrivs|Seccomp):' /proc/1/status"]
+    output_matches: '(?s)^[1-9][0-9]*\n.*CapEff:\s+0{16}\n.*NoNewPrivs:\s+1\n.*Seccomp:\s+2'
+    timeout: 90
+  - id: available
+    role: guard
+    description: "Deployment {{app}} keeps 2 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+    timeout: 90
+  - id: serves
+    role: guard
+    description: "http://{{app}} keeps answering"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", "http://{{app}}"]
+    output_matches: "^{{app}} ok$"
+    timeout: 60
+
+hints:
+  - "Pod Security Admission is configured per namespace with labels such as `pod-security.kubernetes.io/enforce=restricted`. Labelling with `kubectl label ns {{ns}} ...` prints a warning for every existing Pod that would be rejected, and why."
+  - "Enforcement applies only to new Pods: existing ones keep running until replaced. Fix the Pod template, then the rollout creates compliant Pods (or shows `FailedCreate` with the reason in `kubectl -n {{ns}} describe rs`)."
+  - "restricted needs `runAsNonRoot: true` (with a non-zero `runAsUser`, since busybox defaults to root), `allowPrivilegeEscalation: false`, `capabilities.drop: [\"ALL\"]` and `seccompProfile.type: RuntimeDefault`. The app writes only to /tmp and listens on 8080, so it runs fine as UID 1000."
+
+competencies:
+  - Enforcing Pod Security Standards with namespace labels
+  - Making a workload compliant with the restricted profile
+  - Verifying seccomp, no_new_privs and capabilities from /proc
+
+docs:
+  - https://kubernetes.io/docs/concepts/security/pod-security-admission/
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
+  - https://kubernetes.io/docs/tutorials/security/ns-level-pss/

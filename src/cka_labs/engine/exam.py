@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cka_labs import paths
 from cka_labs.backends import Cluster, get_backend
+from cka_labs.config import DEFAULT_CERT, curriculum
 from cka_labs.engine import catalog
 from cka_labs.engine.evaluator import CheckResult, evaluate_all
 from cka_labs.engine.generator import new_seed
@@ -23,6 +24,7 @@ from cka_labs.engine.lifecycle import exam_active, load_session, prepare, provis
 from cka_labs.engine.progress import Progress
 from cka_labs.engine.runner import Runner
 from cka_labs.errors import CkaError
+from cka_labs.models import Lab
 
 
 ExamTaskStatus = Literal["pending", "skipped", "passed", "failed"]
@@ -50,6 +52,7 @@ class ExamState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     exam_id: int
+    cert: str = DEFAULT_CERT  # sessions saved before multi-certification support were CKA
     backend: str
     seed: int
     started_at: float
@@ -105,30 +108,30 @@ def _stable_number(seed: int, lab_id: str) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
-def _select(labs: list[object], seed: int, count: int) -> list[object]:
-    """Pick an 8-task exam with the current CKA weights: 2/1/2/1/2.
+def _select(labs: list[Lab], seed: int, count: int, cert: str = DEFAULT_CERT) -> list[Lab]:
+    """Pick a `count`-task exam split over `cert`'s domains by weight (CKA, 8 tasks: 2/1/2/1/2).
 
-    The catalog is small and each domain's quota is explicit, making the selection
-    auditable rather than probabilistic. A stable hash gives a different exam seed
-    without making a session irreproducible.
+    Each domain's quota is explicit, making the selection auditable rather than
+    probabilistic. A lab counts toward its domain within `cert`. A stable hash gives a
+    different exam per seed without making a session irreproducible.
     """
-    quotas = {"architecture": 2, "workloads": 1, "networking": 2, "storage": 1, "troubleshooting": 2}
-    grouped: dict[str, list[object]] = {domain: [] for domain in quotas}
+    quotas = curriculum(cert).quotas(count)
+    grouped: dict[str, list[Lab]] = {domain: [] for domain in quotas}
     for lab in labs:
-        domain = getattr(lab, "domain")
+        domain = lab.domain_in(cert)
         if domain in grouped:
             grouped[domain].append(lab)
-    selected: list[object] = []
+    selected: list[Lab] = []
     for domain, quota in quotas.items():
-        choices = sorted(grouped[domain], key=lambda lab: (_stable_number(seed, getattr(lab, "id")), getattr(lab, "id")))
+        choices = sorted(grouped[domain], key=lambda lab: (_stable_number(seed, lab.id), lab.id))
         if len(choices) < quota:
-            raise CkaError(f"not enough {domain} labs for an exam (need {quota}, have {len(choices)})")
+            raise CkaError(f"not enough {cert} {domain} labs for an exam (need {quota}, have {len(choices)})")
         # Keep the exam practical: every domain gets at least one level-2+ task
         # when the catalog can provide one.
-        advanced = [lab for lab in choices if getattr(lab, "difficulty") >= 2]
+        advanced = [lab for lab in choices if lab.difficulty >= 2]
         picked = advanced[:1] + [lab for lab in choices if lab not in advanced[:1]]
         selected.extend(picked[:quota])
-    selected.sort(key=lambda lab: (getattr(lab, "domain"), getattr(lab, "id")))
+    selected.sort(key=lambda lab: (lab.domain_in(cert) or "", lab.id))
     return selected
 
 
@@ -141,6 +144,7 @@ class ExamService:
         self,
         backend_name: str = "kind",
         *,
+        cert: str = DEFAULT_CERT,
         duration_minutes: int = 120,
         pass_percent: int = 66,
         seed: int | None = None,
@@ -167,11 +171,7 @@ class ExamService:
             for source in catalog.discover().values()
             if backend_name in source.meta().backends and source.meta().isolation == "namespace"
         ]
-        selected = _select(
-            candidates,
-            exam_seed,
-            8,
-        )
+        selected = _select(candidates, exam_seed, 8, cert)
         exam_id = self.progress.start_exam(
             backend=backend_name, seed=exam_seed, duration_minutes=duration_minutes, pass_percent=pass_percent
         )
@@ -198,13 +198,15 @@ class ExamService:
                     domain=prepared.lab.domain,
                     objectives=prepared.lab.objectives,
                     difficulty=prepared.lab.difficulty,
+                    hints_total=len(prepared.lab.hints),
+                    estimated_minutes=prepared.lab.estimated_minutes,
                     exam_id=exam_id,
                 )
                 tasks.append(
                     ExamTask(
                         number=number,
                         lab_id=prepared.lab.id,
-                        domain=prepared.lab.domain,
+                        domain=prepared.lab.domain_in(cert) or prepared.lab.domain,
                         difficulty=prepared.lab.difficulty,
                         points=_points(prepared.lab.difficulty),
                         backend=backend_name,
@@ -222,6 +224,7 @@ class ExamService:
             raise
         state = ExamState(
             exam_id=exam_id,
+            cert=cert,
             backend=backend_name,
             seed=exam_seed,
             started_at=time.time(),
@@ -291,6 +294,7 @@ class ExamService:
             max_score,
             {
                 "exam_id": exam.exam_id,
+                "cert": exam.cert,
                 "seed": exam.seed,
                 "score": score,
                 "max_score": max_score,

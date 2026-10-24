@@ -148,15 +148,6 @@ class LabService:
         prepared = prepare(source, cluster, seed, self.log)
         provision(prepared, self.log)
         lab = prepared.lab
-        attempt = self.progress.start_attempt(
-            lab_id=lab.id,
-            mode="practice",
-            backend=backend_name,
-            seed=seed,
-            domain=lab.domain,
-            objectives=lab.objectives,
-            difficulty=lab.difficulty,
-        )
         session = ActiveLab(
             lab_id=lab.id,
             backend=backend_name,
@@ -165,10 +156,23 @@ class LabService:
             values=prepared.values,
             captured=prepared.runner.captured,
             started_at=time.time(),
-            attempt_id=attempt,
+            attempt_id=self._start_attempt(lab, backend_name, seed),
         )
         save_session(session)
         return session, lab
+
+    def _start_attempt(self, lab: Lab, backend_name: str, seed: int) -> int:
+        return self.progress.start_attempt(
+            lab_id=lab.id,
+            mode="practice",
+            backend=backend_name,
+            seed=seed,
+            domain=lab.domain,
+            objectives=lab.objectives,
+            difficulty=lab.difficulty,
+            hints_total=len(lab.hints),
+            estimated_minutes=lab.estimated_minutes,
+        )
 
     def task(self, session: ActiveLab) -> str:
         return catalog.get(session.lab_id).read("task.md", session.values)
@@ -216,12 +220,22 @@ class LabService:
         return source.read("explanation.md", session.values) if source.has("explanation.md") else ""
 
     def reset(self) -> ActiveLab:
+        """Re-provision the scenario. Unsolved: same attempt, timer keeps running.
+        Solved: the passed attempt is final, so the replay is a fresh attempt."""
         self._require_no_exam()
         session = self.require_session()
         prepared = self._prepared(session)
         prepared.runner.captured.clear()
         provision(prepared, self.log)
-        session = session.model_copy(update={"captured": prepared.runner.captured, "solved": False})
+        update: dict[str, object] = {"captured": prepared.runner.captured, "solved": False}
+        if session.solved:
+            update |= {
+                "attempt_id": self._start_attempt(prepared.lab, session.backend, session.seed),
+                "started_at": time.time(),
+                "hints_used": 0,
+                "solution_viewed": False,
+            }
+        session = session.model_copy(update=update)
         save_session(session)
         return session
 
@@ -232,7 +246,7 @@ class LabService:
         self.log(f"cleaning up {session.lab_id}")
         prepared.runner.cleanup()
         if not session.solved:
-            self.progress.finish_attempt(session.attempt_id, "abandoned")
+            self.progress.abandon_attempt(session.attempt_id)
         clear_session()
 
     def solve_reference(self) -> None:

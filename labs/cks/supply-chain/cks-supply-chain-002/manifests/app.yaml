@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+  labels:
+    app: {{app}}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: {{app}}
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: web
+          image: docker.io/library/nginx:1.31-alpine
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 2
+---
+# No Pod exists until the learner scales this Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unpinned
+  namespace: {{ns}}
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: unpinned
+  template:
+    metadata:
+      labels:
+        app: unpinned
+    spec:
+      containers:
+        - name: probe
+          image: docker.io/library/busybox:1.37

@@ -1,0 +1,79 @@
+id: workloads-003
+title: Configure an app with a ConfigMap and a Secret
+objectives: [cka/workloads/config, ckad/environment/configmaps, ckad/environment/secrets]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [accounts, profiles, identity]}
+  app: {choices: [authsvc, usersvc, tokensvc]}
+  level: {choices: [debug, warn, info]}
+  password: {choices: [s3cr3t-Pa55, Tr0ub4dor-3, c0rrect-h0rse]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}"}
+
+checks:
+  - id: env-from-configmap
+    description: "LOG_LEVEL is sourced from ConfigMap {{app}}-settings"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].env[*].valueFrom.configMapKeyRef.name} {.spec.template.spec.containers[0].envFrom[*].configMapRef.name}"
+    op: contains
+    value: "{{app}}-settings"
+  - id: env-value
+    description: "LOG_LEVEL={{level}} inside the running container"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [printenv, LOG_LEVEL]
+    output_matches: "^{{level}}$"
+    timeout: 45
+  - id: secret-volume
+    description: "Secret {{app}}-db is mounted as a volume"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.volumes[*].secret.secretName}"
+    op: contains
+    value: "{{app}}-db"
+  - id: secret-file
+    description: "/etc/{{app}}/db/password contains the password"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [cat, "/etc/{{app}}/db/password"]
+    output_matches: "^{{password}}$"
+    timeout: 45
+  - id: secret-readonly
+    description: "The secret mount is read-only"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "grep ' /etc/{{app}}/db ' /proc/mounts | grep -q ' ro,'"]
+    timeout: 45
+  - id: available
+    description: "Deployment {{app}} available"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    role: guard
+    timeout: 60
+
+hints:
+  - "Create both objects imperatively: `kubectl create configmap --from-literal` and `kubectl create secret generic --from-literal`."
+  - "In the Pod template: `env[].valueFrom.configMapKeyRef` (or `envFrom`) for LOG_LEVEL, and a `secret` volume plus a `volumeMount` at `/etc/{{app}}/db` for the password."
+  - "Each Secret key becomes a file named after the key, so the key must be called `password`. Use `readOnly: true` on the volumeMount. Environment variables are only read at container start, so the change needs a rollout (editing the template triggers one)."
+
+competencies:
+  - Creating ConfigMaps and Secrets
+  - Consuming configuration as environment variables and as files
+  - Understanding when configuration changes reach running Pods
+
+docs:
+  - https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+  - https://kubernetes.io/docs/concepts/configuration/secret/
+  - https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/

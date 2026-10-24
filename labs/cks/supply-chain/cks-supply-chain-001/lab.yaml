@@ -1,0 +1,78 @@
+id: cks-supply-chain-001
+title: Allow only trusted registries with a ValidatingAdmissionPolicy
+objectives:
+  - cks/supply-chain/secure-supply-chain
+  - ckad/environment/access-control
+difficulty: 3
+estimated_minutes: 12
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+owned:
+  - "validatingadmissionpolicy/{{policy}}"
+  - "validatingadmissionpolicybinding/{{policy}}"
+params:
+  ns: {choices: [apps, frontend, shop]}
+  app: {choices: [web, storefront, portal]}
+  policy: {choices: [allowed-registries, trusted-images, image-allowlist]}
+
+setup:
+  - kubectl: [label, namespace, "{{ns}}", "security.example.com/image-policy=enforced", --overwrite]
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 2}
+
+checks:
+  - id: binding-scope
+    description: "Binding {{policy}} denies, and only in namespaces labelled image-policy=enforced"
+    type: jsonpath
+    resource: "validatingadmissionpolicybinding/{{policy}}"
+    jsonpath: '{.spec.policyName}/{.spec.validationActions[*]}/{.spec.matchResources.namespaceSelector.matchLabels.security\.example\.com/image-policy}'
+    value: "{{policy}}/Deny/enforced"
+  - id: rogue-denied
+    description: "Scaled-up Deployment rogue (ghcr.io image) is denied by {{policy}}"
+    type: jsonpath
+    resource: deployment/rogue
+    namespace: "{{ns}}"
+    jsonpath: '{.status.conditions[?(@.type=="ReplicaFailure")].message}'
+    op: contains
+    value: "ValidatingAdmissionPolicy '{{policy}}'"
+    timeout: 60
+  - id: init-container-denied
+    description: "Scaled-up Deployment {{app}}-tools (quay.io init container) is denied by {{policy}}"
+    type: jsonpath
+    resource: "deployment/{{app}}-tools"
+    namespace: "{{ns}}"
+    jsonpath: '{.status.conditions[?(@.type=="ReplicaFailure")].message}'
+    op: contains
+    value: "ValidatingAdmissionPolicy '{{policy}}'"
+    timeout: 60
+  - id: trusted-restarted
+    description: "Deployment {{app}} was restarted under the policy"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: '{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}'
+    op: nonempty
+  - id: trusted-available
+    role: guard
+    description: "Deployment {{app}} (docker.io/library image) keeps 2 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+    timeout: 90
+
+hints:
+  - "A ValidatingAdmissionPolicy holds CEL `validations` and `matchConstraints` (which requests); a ValidatingAdmissionPolicyBinding says where it applies (`matchResources.namespaceSelector`) and what to do (`validationActions: [Deny]`). Without a binding the policy does nothing."
+  - "Check every container list: `object.spec.containers.all(c, c.image.startsWith('docker.io/library/'))`, and the same for `initContainers`, which may be absent (`!has(object.spec.initContainers) || ...`). Match `CREATE` and `UPDATE` of `pods` in group `\"\"`, version `v1`."
+  - "Controllers create the Pods, so a denial shows up on the ReplicaSet and Deployment: `kubectl -n {{ns}} scale deploy rogue --replicas=1`, then `kubectl -n {{ns}} describe rs -l app=rogue` or the Deployment's `ReplicaFailure` condition."
+
+competencies:
+  - Writing a ValidatingAdmissionPolicy with CEL
+  - Scoping a policy binding to labelled namespaces
+  - Restricting images to trusted registries
+  - Finding admission denials of controller-created Pods
+
+docs:
+  - https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+  - https://kubernetes.io/docs/reference/using-api/cel/
+  - https://kubernetes.io/docs/concepts/containers/images/#image-names

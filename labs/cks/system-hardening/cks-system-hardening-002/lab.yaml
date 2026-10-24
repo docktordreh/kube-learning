@@ -1,0 +1,63 @@
+id: cks-system-hardening-002
+title: Apply a seccomp profile and remove ambient capabilities
+objectives:
+  - cks/system-hardening/kernel-hardening
+  - ckad/environment/security-contexts
+difficulty: 2
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [workers, batch, edge-services]}
+  app: {choices: [collector, processor, relay]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 1}
+
+checks:
+  - id: runtime-default
+    description: "{{app}} explicitly selects the RuntimeDefault seccomp profile"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: '{.spec.template.spec.securityContext.seccompProfile.type}'
+    value: RuntimeDefault
+  - id: no-new-privileges
+    description: "{{app}} cannot gain new privileges"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [grep, NoNewPrivs, /proc/1/status]
+    output_matches: 'NoNewPrivs:\s+1'
+    timeout: 60
+  - id: no-effective-capabilities
+    description: "{{app}} has no effective Linux capabilities"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, 'set -- $(grep CapEff /proc/1/status); echo "CapEff $2"; [ "$2" = 0000000000000000 ]']
+    timeout: 60
+  - id: available
+    role: guard
+    description: "Deployment {{app}} keeps 1 ready replica"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 1
+    timeout: 90
+
+hints:
+  - "Set the Pod-level `securityContext.seccompProfile.type` to `RuntimeDefault`. This selects the runtime's syscall filter without requiring a profile file on every node."
+  - "Container-level `allowPrivilegeEscalation: false` sets `NoNewPrivs: 1`. Set `capabilities.drop: [\"ALL\"]` in the same container securityContext."
+  - "Inspect the live result with `kubectl -n {{ns}} exec deploy/{{app}} -- grep -E '^(CapEff|NoNewPrivs|Seccomp):' /proc/1/status`. The Pod must remain ready after its security context changes."
+
+competencies:
+  - Selecting RuntimeDefault seccomp without node profile distribution
+  - Disabling privilege escalation with no-new-privs
+  - Dropping effective Linux capabilities
+
+docs:
+  - https://kubernetes.io/docs/tutorials/security/seccomp/
+  - https://kubernetes.io/docs/reference/node/seccomp/
+  - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/

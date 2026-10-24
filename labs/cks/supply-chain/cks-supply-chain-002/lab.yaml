@@ -1,0 +1,69 @@
+id: cks-supply-chain-002
+title: Require image digests with a ValidatingAdmissionPolicy
+objectives:
+  - cks/supply-chain/secure-supply-chain
+  - ckad/environment/access-control
+difficulty: 3
+estimated_minutes: 12
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+owned:
+  - "validatingadmissionpolicy/{{policy}}"
+  - "validatingadmissionpolicybinding/{{policy}}"
+params:
+  ns: {choices: [release, storefront, production]}
+  app: {choices: [web, catalog, portal]}
+  policy: {choices: [require-image-digests, pinned-images, immutable-tags]}
+
+setup:
+  - kubectl: [label, namespace, "{{ns}}", "security.example.com/digests=enforced", --overwrite]
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 2}
+
+checks:
+  - id: binding-scope
+    description: "Binding {{policy}} denies tag-only images in labelled namespaces"
+    type: jsonpath
+    resource: "validatingadmissionpolicybinding/{{policy}}"
+    jsonpath: '{.spec.policyName}/{.spec.validationActions[*]}/{.spec.matchResources.namespaceSelector.matchLabels.security\.example\.com/digests}'
+    value: "{{policy}}/Deny/enforced"
+  - id: unpinned-denied
+    description: "Deployment unpinned is denied because its image has no digest"
+    type: jsonpath
+    resource: deployment/unpinned
+    namespace: "{{ns}}"
+    jsonpath: '{.status.conditions[?(@.type=="ReplicaFailure")].message}'
+    op: contains
+    value: "ValidatingAdmissionPolicy '{{policy}}'"
+    timeout: 60
+  - id: app-pinned
+    description: "Deployment {{app}} uses an immutable image digest"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: '{.spec.template.spec.containers[0].image}'
+    op: contains
+    value: "@sha256:"
+  - id: app-available
+    role: guard
+    description: "Deployment {{app}} keeps 2 ready replicas after pinning"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+    timeout: 90
+
+hints:
+  - "A tag such as `nginx:1.31-alpine` can move. A digest reference has the form `image:tag@sha256:<64 hex characters>`. Inspect the image metadata available in your registry or build pipeline before editing the Deployment."
+  - "Create a ValidatingAdmissionPolicy matching Pod CREATE and UPDATE requests. Its CEL validation must require every container image to contain a digest, and its binding must use `validationActions: [Deny]`."
+  - "The ReplicaSet creates Pods for `unpinned`; scale it with `kubectl -n {{ns}} scale deploy/unpinned --replicas=1` and inspect its FailedCreate event. Patch {{app}} to the pinned nginx digest, then wait for the rollout."
+
+competencies:
+  - Requiring immutable image references with CEL
+  - Distinguishing tags from content-addressed image digests
+  - Diagnosing admission failures from controller events
+
+docs:
+  - https://kubernetes.io/docs/concepts/containers/images/#image-names
+  - https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+  - https://kubernetes.io/docs/reference/using-api/cel/

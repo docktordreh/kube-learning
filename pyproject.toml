@@ -1,7 +1,7 @@
 [project]
 name = "cka-labs"
 version = "0.1.0"
-description = "Self-hosted CKA practice lab generator and exam simulator"
+description = "Self-hosted CKA/CKAD/CKS practice lab generator and exam simulator"
 readme = { file = "README.org", content-type = "text/plain" }
 requires-python = ">=3.12"
 license = "Apache-2.0"

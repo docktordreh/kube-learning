@@ -1,4 +1,4 @@
-#+title: cka-labs: CKA practice labs and mock exams
+#+title: cka-labs: CKA, CKAD and CKS practice labs and mock exams
 
 * Overview
 
@@ -7,11 +7,14 @@ It creates disposable clusters, introduces a fault, checks the live cluster
 state, and stores practice results in SQLite.
 
 The project is independent of the Linux Foundation. Its labs are original
-practice exercises, not CKA exam questions.
+practice exercises, not certification exam questions.
 
-The current CKA target is Kubernetes =v1.37=, verified on 2026-10-19. The
-version, domain weights, and objectives live in
-=src/cka_labs/data/curriculum.yaml=.
+Each certification has its own curriculum file in
+=src/cka_labs/data/curricula/=, holding its version, domain weights and
+objectives. CKA and CKAD target Kubernetes =v1.37=. CKS follows the newest
+published CKS curriculum, =v1.34=. One lab can count toward several
+certifications. CKA is the default; choose another one with =--cert= or
+=CKA_CERT=. See [[file:docs/curriculum.org][curriculum]].
 
 * Start with kind
 
@@ -51,15 +54,38 @@ ConfigMap in =kube-system=.
 
 * Labs and progress
 
-The catalog contains 22 labs across the five CKA domains. All 22 passed the
-real kind conformance cycle on Kubernetes v1.37. The cycle checks setup, the
-initial fault, the reference fix, grading, reset, and cleanup.
+The catalog contains 41 labs: 23 under =labs/cka/= covering the five CKA
+domains (including a Gateway API migration), 10 under =labs/ckad/= covering
+the five CKAD domains, and 8 original CKS labs covering Pod Security Standards,
+Secret delivery, seccomp, AppArmor, immutable containers, audit logging,
+registry admission and digest pinning. Many labs count for more than one
+certification. Kind-compatible labs pass the real conformance cycle on
+Kubernetes v1.37; AppArmor and audit logging also pass on kubeadm because they
+require node or control-plane access. The cycle checks setup, the initial
+fault, the reference fix, grading, reset, and cleanup.
+
+All labs use original task text, fixtures, solutions and checks based on public
+Kubernetes behavior and certification competency boundaries.
+
+Labs can require pinned tools and shared cluster components. The Helm lab uses
+the =helm= binary from =cka setup=, the API deprecation lab the
+=kubectl-convert= plugin. The image lab builds with the host's Docker; =cka
+image load <image>= (or =--archive <tar>=) copies a locally built image into
+the kind nodes, since the cluster cannot pull from your machine. The Ingress and Gateway API labs use
+Traefik, which cka installs into the =traefik= namespace the first time a lab
+needs it, from a digest-checked chart and cached images. Traefik provides the
+IngressClass and GatewayClass =traefik=, and brings the pinned Gateway API CRDs
+(standard channel) along.
 
 #+begin_src sh
 cka practice --weakest
 cka practice --domain troubleshooting
 cka practice --difficulty advanced
+cka practice --cert ckad
+cka lab list --cert cks
 cka progress
+cka progress --cert ckad
+cka progress networking-003
 cka progress --json > progress.json
 #+end_src
 
@@ -67,6 +93,7 @@ cka progress --json > progress.json
 
 #+begin_src sh
 cka exam start
+cka exam start --cert ckad
 cka exam status
 cka exam task 3
 cka exam skip 3
@@ -74,12 +101,12 @@ cka exam submit
 cka exam results
 #+end_src
 
-The default exam has eight tasks and a 120-minute limit. It selects tasks in
-the official 25/15/20/10/30 domain proportions and assigns points by
-difficulty. Kind exams use namespace-isolated tasks in one cluster. Node and
+The default exam has eight tasks and a 120-minute limit. It splits the tasks
+over the certification's domains by their official weights (CKA: 2/1/2/1/2)
+and assigns points by difficulty. Kind exams use namespace-isolated tasks in one cluster. Node and
 control-plane tasks are available as labs and require the kubeadm backend.
 
-Scores measure local practice performance. They are not official CKA results.
+Scores measure local practice performance. They are not official certification results.
 
 * Backends
 

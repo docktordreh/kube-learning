@@ -1,0 +1,69 @@
+id: cks-microservice-vulnerabilities-002
+title: Remove a Secret from a container environment
+objectives:
+  - cks/microservice-vulnerabilities/secrets
+  - ckad/environment/secrets
+difficulty: 2
+estimated_minutes: 10
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [orders, billing, reports]}
+  app: {choices: [invoice-api, order-api, report-api]}
+  secret: {choices: [database-credentials, service-password, api-credentials]}
+  value: {choices: [red-fox-741, blue-lake-852, green-field-963]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 1}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+
+checks:
+  - id: secret-not-in-environment
+    description: "{{secret}} is not exposed through {{app}}'s environment"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "env | grep '^APP_PASSWORD='"]
+    expect: failure
+    timeout: 60
+  - id: secret-mounted
+    description: "{{app}} reads {{secret}} from a mounted Secret file"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [cat, /run/secrets/app/password]
+    output_matches: "^{{value}}$"
+    timeout: 60
+  - id: available
+    role: guard
+    description: "Deployment {{app}} keeps 1 ready replica"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 1
+    timeout: 90
+  - id: serves
+    role: guard
+    description: "http://{{app}} keeps answering"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", "http://{{app}}"]
+    output_matches: "^{{app}} ready$"
+    timeout: 60
+
+hints:
+  - "List the Deployment and inspect its container environment: `kubectl -n {{ns}} get deploy {{app}} -o yaml`. The Secret currently arrives through `secretKeyRef`."
+  - "Mount the Secret as a volume at `/run/secrets/app`; Kubernetes creates one file per key. Use `readOnly: true` and set `defaultMode: 0400`."
+  - "Remove the `APP_PASSWORD` environment entry, add a Secret volume named `app-secret`, and mount it into the `web` container. Roll out the Deployment and read `/run/secrets/app/password` from inside the new Pod."
+
+competencies:
+  - Keeping Secret values out of process environments
+  - Mounting Secret data as read-only files
+  - Preserving workload availability during a security change
+
+docs:
+  - https://kubernetes.io/docs/concepts/configuration/secret/
+  - https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/
+  - https://kubernetes.io/docs/concepts/configuration/secret/#using-secrets-as-files-from-a-pod

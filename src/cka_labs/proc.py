@@ -30,6 +30,9 @@ def tool_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     env["PATH"] = f"{paths.bin_dir()}{os.pathsep}{env.get('PATH', '')}"
     # kubectl's discovery cache defaults to ~/.kube/cache; keep it inside the cka directory.
     env["KUBECACHEDIR"] = str(paths.home() / "cache" / "kube")
+    # Helm's repositories, plugins and cache likewise stay out of ~/.config, ~/.cache, ~/.local.
+    for kind in ("CACHE", "CONFIG", "DATA"):
+        env[f"HELM_{kind}_HOME"] = str(paths.home() / "helm" / kind.lower())
     if extra:
         env.update(extra)
     return env

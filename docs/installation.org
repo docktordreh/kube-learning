@@ -14,14 +14,17 @@ uv sync
 uv run cka doctor
 #+end_src
 
-Install pinned tools and cache the v1.37 node image and lab images:
+Install pinned tools (kind, kubectl, kubectl-convert, helm), cache the cluster components (the
+Traefik chart and the Gateway API CRD manifest), and cache the v1.37 node image
+and lab images:
 
 #+begin_src sh
 uv run cka setup
 #+end_src
 
 The installer writes only to =${XDG_DATA_HOME:-~/.local/share}/cka-labs= and
-verifies upstream SHA-256 files. The Docker image cache permits later labs to
+verifies upstream SHA-256 files and chart digests. Helm's cache, configuration
+and data also live there, not in =~/.config= or =~/.cache=. The Docker image cache permits later labs to
 run without registry access. A lab that deliberately tests an image pull
 failure is the one exception: its bad image is intentionally absent.
 

@@ -23,6 +23,24 @@ The conformance test creates an unrelated =cka-sentinel/keep-me= ConfigMap.
 Every lab must leave it intact. It also checks that all nodes remain Ready and
 that the default kubeconfig has not appeared or changed.
 
+* Cluster components
+
+Components such as Traefik are shared add-ons, installed when a lab lists them
+in =requires=. A component is either a Helm chart (reinstalled only when the
+chart or its values change) or a manifest applied server-side, such as the
+Gateway API CRDs. Each is pinned in =toolchain.yaml= and checked against its
+SHA-256 digest. Their images are part of the offline image set. The
+install runs only after the cluster marker is verified. The component's
+namespace carries =cka-labs.io/component=<name>=, never the lab label, so lab
+cleanup and conformance leave it alone. It goes away with =cka cluster down=.
+
+* Host images
+
+=cka image load= copies images from the host's Docker (or an archive) into the
+nodes of the cka-managed kind cluster. It verifies the cluster marker first and
+never pulls from a registry. Labs that build images remove only the image
+names they created, listed explicitly in their cleanup.
+
 * Grading permissions
 
 The grader uses a cka-created ServiceAccount. It has get/list/watch, read-only

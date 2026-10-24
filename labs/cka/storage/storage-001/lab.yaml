@@ -1,0 +1,87 @@
+id: storage-001
+title: Database stuck Pending on its volume claim
+objectives: [cka/storage/pv-pvc, cka/storage/storage-classes, ckad/design-build/volumes]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [data, reporting, metrics]}
+  app: {choices: [postgres, warehouse, tsdb]}
+  wrong_class: {choices: [fast-ssd, premium-rwo, gp3]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait:
+      type: jsonpath
+      resource: "pvc/{{app}}-data"
+      namespace: "{{ns}}"
+      jsonpath: "{.status.phase}"
+      value: Pending
+  - capture: image
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+
+checks:
+  - id: pvc-bound
+    description: "PVC {{app}}-data is Bound"
+    type: jsonpath
+    resource: "pvc/{{app}}-data"
+    namespace: "{{ns}}"
+    jsonpath: "{.status.phase}"
+    value: Bound
+    timeout: 60
+  - id: default-class
+    description: "PVC uses the cluster's default StorageClass (standard)"
+    type: jsonpath
+    resource: "pvc/{{app}}-data"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.storageClassName}"
+    value: standard
+  - id: capacity
+    role: guard
+    description: "PVC requests at least 1Gi"
+    type: script
+    script: |
+      req=$(kubectl -n {{ns}} get pvc {{app}}-data -o jsonpath='{.spec.resources.requests.storage}')
+      num=${req%%[A-Za-z]*}; unit=${req#"$num"}
+      case "$unit" in Ti) mib=$((num * 1048576));; Gi) mib=$((num * 1024));; Mi) mib=$num;; *) mib=0;; esac
+      echo "requested ${req:-nothing} (${mib} MiB)"
+      [ "$mib" -ge 1024 ]
+  - id: app-ready
+    description: "Deployment {{app}} is available"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    timeout: 90
+  - id: mounted
+    description: "The running Pod mounts the claim at /var/lib/data"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [sh, -c, "grep -q ' /var/lib/data ' /proc/mounts && ls /var/lib/data"]
+    timeout: 30
+  - id: image-untouched
+    role: guard
+    description: "Container image unchanged"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+    value: "{{captured.image}}"
+
+hints:
+  - "Why is the Pod Pending? `kubectl -n {{ns}} describe pod` and then describe the PersistentVolumeClaim it uses."
+  - "`kubectl get storageclass`: which classes exist, and which one is marked (default)? Compare that with the claim's storageClassName."
+  - "`spec.storageClassName` of a PVC is immutable. Recreate the claim (same name, 1Gi, ReadWriteOnce) without the bogus class. The PVC stays Terminating while a Pod references it, so scale the Deployment to 0 first or delete the Pod."
+
+competencies:
+  - Diagnosing Pending Pods caused by unbound claims
+  - StorageClasses, default class and dynamic provisioning
+  - Immutable PVC fields and recreating claims safely
+
+docs:
+  - https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+  - https://kubernetes.io/docs/concepts/storage/storage-classes/
+  - https://kubernetes.io/docs/concepts/storage/dynamic-provisioning/

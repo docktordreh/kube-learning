@@ -1,0 +1,99 @@
+id: ckad-design-build-003
+title: Build, save, load and roll out a modified image
+objectives: [ckad/design-build/images, ckad/deployment/rolling-updates]
+difficulty: 2
+estimated_minutes: 10
+# Builds with the host's Docker and loads into kind nodes (`cka image load`).
+backends: [kind]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [web, frontend, edge]}
+  app: {choices: [greeter, hello-web, banner]}
+
+setup:
+  - script: |
+      set -eu
+      ctx="{{workdir}}/app"
+      mkdir -p "$ctx"
+      cat > "$ctx/Dockerfile" <<'EOF'
+      FROM docker.io/library/busybox:1.37
+      COPY index.html /www/index.html
+      EXPOSE 8080
+      CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
+      EOF
+      echo "{{app}} 1.0" > "$ctx/index.html"
+      docker build --quiet --tag cka-lab/{{app}}:1.0 "$ctx" >/dev/null
+      cka image load cka-lab/{{app}}:1.0 >/dev/null
+      # The next release's content is ready; its image is not built yet.
+      echo "{{app}} 2.0" > "$ctx/index.html"
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: "{{app}}", replicas: 2}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+
+cleanup:
+  # Only the two image names this lab creates on the host.
+  - script: docker image rm cka-lab/{{app}}:1.0 cka-lab/{{app}}:2.0 >/dev/null 2>&1 || true
+
+checks:
+  - id: image-user
+    description: "Image cka-lab/{{app}}:2.0 runs as user 1000 by default"
+    type: script
+    script: |
+      user=$(docker image inspect cka-lab/{{app}}:2.0 --format '{{.Config.User}}' 2>/dev/null) || { echo "image cka-lab/{{app}}:2.0 not found"; exit 1; }
+      echo "image user: ${user:-root}"
+      echo "$user" | grep -Eq '^1000(:|$)'
+  - id: archive
+    description: "{{workdir}}/{{app}}-2.0.tar holds cka-lab/{{app}}:2.0"
+    type: script
+    script: |
+      f="{{workdir}}/{{app}}-2.0.tar"
+      [ -s "$f" ] || { echo "$f is missing"; exit 1; }
+      { tar -xOf "$f" manifest.json; tar -xOf "$f" index.json; } 2>/dev/null | grep -q 'cka-lab/{{app}}:2.0'
+  - id: rolled-out
+    description: "Deployment {{app}} runs cka-lab/{{app}}:2.0"
+    type: jsonpath
+    resource: "deployment/{{app}}"
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+    op: matches
+    value: 'cka-lab/{{app}}:2\.0$'
+  - id: serves-new-version
+    description: "http://{{app}} answers with the 2.0 content"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", "http://{{app}}"]
+    output_matches: "^{{app}} 2\\.0$"
+    timeout: 60
+  - id: runs-as-1000
+    description: "The {{app}} containers run as UID 1000"
+    type: exec
+    namespace: "{{ns}}"
+    selector: "app={{app}}"
+    command: [id, -u]
+    output_matches: "^1000$"
+    timeout: 60
+  - id: available
+    role: guard
+    description: "Deployment {{app}} keeps 2 ready replicas"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: "{{app}}"
+    replicas: 2
+    timeout: 60
+
+hints:
+  - "The build context is `{{workdir}}/app`. A Dockerfile instruction sets the default user of every container started from the image; `docker image inspect <image> --format '{{.Config.User}}'` shows it (empty means root)."
+  - "`docker build -t cka-lab/{{app}}:2.0 {{workdir}}/app`, then `docker save -o {{workdir}}/{{app}}-2.0.tar cka-lab/{{app}}:2.0`. The cluster cannot pull from your machine: `cka image load cka-lab/{{app}}:2.0` copies the image into its nodes."
+  - "`kubectl -n {{ns}} set image deployment/{{app}} app=cka-lab/{{app}}:2.0` starts the rollout; `imagePullPolicy: Never` makes the kubelet use the loaded image. Port 8080 is above 1024, so httpd runs fine without root."
+
+competencies:
+  - Modifying a Dockerfile (USER) and building a tagged image
+  - Saving an image as an archive
+  - Rolling a Deployment to a locally built image
+
+docs:
+  - https://docs.docker.com/reference/dockerfile/#user
+  - https://docs.docker.com/reference/cli/docker/image/save/
+  - https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy
+  - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment

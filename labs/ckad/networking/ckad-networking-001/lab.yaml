@@ -1,0 +1,68 @@
+id: ckad-networking-001
+title: Route one host to three Services by path
+objectives: [ckad/networking/ingress, cka/networking/ingress]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+requires: [traefik]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [streaming, media, broadcast]}
+  host: {choices: [streams.local, media.example.test, tv.example.test]}
+
+setup:
+  - apply: manifests/app.yaml
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: api-server}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: video-processor}
+  - wait: {type: deployment_ready, namespace: "{{ns}}", name: fallback}
+  - wait: {type: pods_ready, namespace: "{{ns}}", selector: "role=client"}
+
+checks:
+  - id: api-route
+    description: "http://{{host}}/api reaches api-service"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", --header, "Host: {{host}}", "http://traefik.traefik.svc.cluster.local/api"]
+    output_matches: "^served by api-server$"
+    timeout: 30
+  - id: video-route
+    description: "http://{{host}}/video reaches video-service"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", --header, "Host: {{host}}", "http://traefik.traefik.svc.cluster.local/video"]
+    output_matches: "^served by video-processor$"
+    timeout: 30
+  - id: catch-all
+    description: "Every other path of {{host}} reaches fallback-service"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [wget, -qO-, -T, "3", --header, "Host: {{host}}", "http://traefik.traefik.svc.cluster.local/"]
+    output_matches: "^served by fallback$"
+    timeout: 30
+  - id: other-hosts-unrouted
+    role: guard
+    description: "Requests for other hosts are not routed into {{ns}}"
+    type: exec
+    namespace: "{{ns}}"
+    pod: client
+    command: [sh, -c, "wget -qO- -T 3 --header 'Host: other.{{host}}' http://traefik.traefik.svc.cluster.local/api 2>&1; true"]
+    output_matches: "404 Not Found"
+    timeout: 30
+
+hints:
+  - "An Ingress only describes routes; the controller (Traefik here, IngressClass `traefik`) implements them. `kubectl get ingressclass` and `kubectl -n {{ns}} get svc` show what you can use."
+  - "`kubectl create ingress app-ingress -n {{ns}} --rule='{{host}}/api*=api-service:80' --rule='{{host}}/video*=video-service:80' --rule='{{host}}/*=fallback-service:80'` generates it; the `*` makes a Prefix path. Inspect with `kubectl -n {{ns}} describe ingress app-ingress`."
+  - "Test exactly as the checks do: `kubectl -n {{ns}} exec client -- wget -qO- --header 'Host: {{host}}' http://traefik.traefik.svc.cluster.local/api`. A `404 page not found` from Traefik means no rule matched host and path."
+
+competencies:
+  - Writing host and path rules in an Ingress
+  - Ordering overlapping Prefix paths (longest match wins)
+  - Testing Ingress routing through the controller with a Host header
+
+docs:
+  - https://kubernetes.io/docs/concepts/services-networking/ingress/
+  - https://kubernetes.io/docs/concepts/services-networking/ingress/#default-backend
+  - https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/ingress/

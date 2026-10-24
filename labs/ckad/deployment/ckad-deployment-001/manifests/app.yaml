@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}-blue
+  namespace: {{ns}}
+  labels:
+    app: {{app}}
+    color: blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: {{app}}
+      color: blue
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+        color: blue
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.30-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+spec:
+  selector:
+    app: {{app}}
+    color: blue
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  namespace: {{ns}}
+  labels:
+    role: client
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+    - name: client
+      image: docker.io/library/busybox:1.37
+      command: ["sleep", "infinity"]

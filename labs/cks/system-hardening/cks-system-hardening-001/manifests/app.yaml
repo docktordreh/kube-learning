@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{app}}
+  namespace: {{ns}}
+  labels:
+    app: {{app}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{app}}
+  template:
+    metadata:
+      labels:
+        app: {{app}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      # The AppArmor profile exists only on this node.
+      nodeSelector:
+        kubernetes.io/hostname: {{node.worker1}}
+      containers:
+        - name: agent
+          image: docker.io/library/busybox:1.37
+          command: ["sleep", "infinity"]

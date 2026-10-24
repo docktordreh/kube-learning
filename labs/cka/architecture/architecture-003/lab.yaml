@@ -1,0 +1,106 @@
+id: architecture-003
+title: Install a component with a Kustomize overlay
+objectives: [cka/architecture/helm-kustomize, ckad/deployment/kustomize]
+difficulty: 2
+estimated_minutes: 8
+backends: [kind, kubeadm]
+namespaces: ["{{ns}}"]
+params:
+  ns: {choices: [observability, platform-tools, monitoring]}
+  replicas: {choices: ["2", "3"]}
+
+setup:
+  - script: |
+      set -eu
+      base="$CKA_WORKDIR/component/base"
+      mkdir -p "$base"
+      cat > "$base/kustomization.yaml" <<'EOF'
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+        - deployment.yaml
+        - service.yaml
+      labels:
+        - pairs:
+            app.kubernetes.io/name: status-page
+          includeSelectors: true
+      EOF
+      cat > "$base/deployment.yaml" <<'EOF'
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: status-page
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: web
+                image: docker.io/library/nginx:1.30-alpine
+                ports:
+                  - containerPort: 80
+                readinessProbe:
+                  httpGet: {path: /, port: 80}
+                  periodSeconds: 2
+      EOF
+      cat > "$base/service.yaml" <<'EOF'
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: status-page
+      spec:
+        ports:
+          - port: 80
+      EOF
+
+checks:
+  - id: overlay-renders
+    description: "{{workdir}}/component/overlays/prod renders with kustomize"
+    type: script
+    script: |
+      out=$(kubectl kustomize "{{workdir}}/component/overlays/prod" 2>&1) || { echo "$out" | tail -n 3; exit 1; }
+      echo "$out" | grep -q "namespace: {{ns}}" || { echo "overlay does not set namespace {{ns}}"; exit 1; }
+      echo "renders $(echo "$out" | grep -c '^kind:') objects"
+  - id: deployment
+    description: "Deployment prod-status-page runs {{replicas}} replicas in {{ns}}"
+    type: deployment_ready
+    namespace: "{{ns}}"
+    name: prod-status-page
+    replicas: "{{replicas}}"
+    timeout: 60
+  - id: image
+    description: "prod-status-page uses nginx:1.31-alpine"
+    type: jsonpath
+    resource: deployment/prod-status-page
+    namespace: "{{ns}}"
+    jsonpath: "{.spec.template.spec.containers[0].image}"
+    op: matches
+    value: "(^|/)nginx:1\\.31-alpine$"
+  - id: env-label
+    description: "Deployment and Pods carry env=prod"
+    type: jsonpath
+    resource: deployment/prod-status-page
+    namespace: "{{ns}}"
+    jsonpath: "{.metadata.labels.env} {.spec.template.metadata.labels.env}"
+    value: "prod prod"
+  - id: service
+    description: "Service prod-status-page routes to the Pods"
+    type: service_endpoints
+    namespace: "{{ns}}"
+    service: prod-status-page
+    min_ready: "{{replicas}}"
+    timeout: 30
+
+hints:
+  - "`kubectl kustomize {{workdir}}/component/base` shows what the base renders to. An overlay is a directory with its own kustomization.yaml that lists the base under `resources:`."
+  - "The overlay fields you need: `namespace`, `namePrefix`, `labels` (with `includeTemplates: true` so the Pods get env=prod too, but not `includeSelectors`, which would change the immutable Deployment selector), `replicas`, `images`. See the Kustomize docs page in the task's documentation."
+  - "Render with `kubectl kustomize <dir>` until it looks right, then `kubectl apply -k {{workdir}}/component/overlays/prod`."
+
+competencies:
+  - Kustomize bases and overlays
+  - Built-in transformers (namespace, namePrefix, labels, replicas, images)
+  - kubectl apply -k
+
+docs:
+  - https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/
+  - https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/
